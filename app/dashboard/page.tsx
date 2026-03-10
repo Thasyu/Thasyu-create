@@ -108,7 +108,7 @@ export default function DashboardPage() {
               <tr><td colSpan={3} className="px-4 py-6 text-center">読み込み中...</td></tr>
             ) : projects.length === 0 ? (
               <tr>
-                <td colSpan={3} className="px-4 py-6 text-center text-black/60">
+                <td colSpan={3} className="px-4 py-6 text-center text-white">
                   プロジェクトはありません。
                 </td>
               </tr>
