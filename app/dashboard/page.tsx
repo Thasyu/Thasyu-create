@@ -8,54 +8,67 @@ type Project = {
   updatedAt: string;
 };
 
+const STORAGE_KEY = "projects";
+
+const readProjects = (): Project[] => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter(
+      (item): item is Project =>
+        typeof item?.id === "number" &&
+        typeof item?.title === "string" &&
+        typeof item?.updatedAt === "string"
+    );
+  } catch {
+    return [];
+  }
+};
+
+const writeProjects = (projects: Project[]) => {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+};
+
 export default function DashboardPage() {
-  // 初期データ(initialProjects)を消し、空の配列から開始します
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // --- データのやり取り (API連携) ---
-
-  // 1. 一覧取得
-  const fetchProjects = async () => {
+  const fetchProjects = () => {
     setIsLoading(true);
-    const res = await fetch("/api/projects");
-    const data = await res.json();
-    if (Array.isArray(data)) {
-      setProjects(data);
-    }
+    const data = readProjects();
+    setProjects(data);
     setIsLoading(false);
   };
 
-  // 画面が開いた時に一度だけ実行
   useEffect(() => {
     fetchProjects();
   }, []);
 
-  // 2. 新規作成
-  const handleCreate = async () => {
-    const res = await fetch("/api/projects", { method: "POST" });
-    if (res.ok) {
-      // 作成に成功したら一覧を再取得
-      fetchProjects();
-    }
+  const handleCreate = () => {
+    const current = readProjects();
+    const maxId = current.reduce((max, project) => Math.max(max, project.id), 0);
+    const newProject: Project = {
+      id: maxId + 1,
+      title: "無題のプロジェクト",
+      updatedAt: new Date().toISOString(),
+    };
+    const nextProjects = [newProject, ...current];
+    writeProjects(nextProjects);
+    setProjects(nextProjects);
   };
 
-  // 3. 削除
-  const handleDelete = async (projectId: number) => {
-    const res = await fetch("/api/projects", {
-      method: "DELETE",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ id: projectId }),
-    });
-
-    if (res.ok) {
-      fetchProjects();
-    }
+  const handleDelete = (projectId: number) => {
+    const current = readProjects();
+    const nextProjects = current.filter((project) => project.id !== projectId);
+    writeProjects(nextProjects);
+    setProjects(nextProjects);
   };
-
-  // --- 見た目の処理 ---
 
   const dateFormatter = useMemo(
     () =>
