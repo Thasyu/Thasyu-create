@@ -1,6 +1,7 @@
 "use client";
 import { useEffect } from "react";
 import gsap from "gsap";
+import Link from "next/link";
 
 export default function Home() {
   useEffect(() => {
@@ -57,7 +58,7 @@ export default function Home() {
       <main className="relative z-10 mx-auto flex w-full max-w-[1200px] flex-1 items-center justify-center px-6 py-10 md:px-10 md:py-14 lg:px-12 lg:py-16">
         <section className="w-full max-w-[980px] space-y-10 text-center md:space-y-12 lg:max-w-[1080px]">
           <h1 className="space-y-3 text-[clamp(2.8rem,8.4vw,7rem)] font-black leading-[1.05] tracking-tight lg:text-[7.25rem] lg:leading-[1.02]">
-            <span className="hero-title-line block">退屈な文字を、</span>
+            <span className="hero-title-line block">退屈な文字を</span>
             <span className="hero-title-line block text-blue-400 lg:whitespace-nowrap">主役レベルに躍らせる。</span>
           </h1>
 
@@ -69,9 +70,12 @@ export default function Home() {
             <button className="rounded-2xl bg-blue-600 px-9 py-4 text-lg font-bold text-white transition hover:-translate-y-0.5 hover:bg-blue-500 hover:shadow-lg hover:shadow-blue-950/50">
               プロジェクトを始める
             </button>
-            <button className="rounded-2xl border border-blue-700/70 bg-zinc-900 px-9 py-4 text-lg font-semibold text-zinc-200 transition hover:border-blue-500">
+            <Link
+              href="/dashboard"
+              className="rounded-2xl border border-blue-700/70 bg-zinc-900 px-9 py-4 text-lg font-semibold text-zinc-200 transition hover:border-blue-500"
+            >
               ドキュメントを見る
-            </button>
+            </Link>
           </div>
         </section>
       </main>
