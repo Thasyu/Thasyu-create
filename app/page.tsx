@@ -47,7 +47,7 @@ export default function Home() {
         <div className="animated-orb orb-three absolute bottom-[-30%] left-[16%] h-[44rem] w-[44rem] rounded-full bg-indigo-500/30 blur-[140px]" />
       </div>
 
-      <nav className="relative z-10 mx-auto flex w-full max-w-[1200px] items-center px-6 py-6 md:px-10 lg:px-12">
+      <nav className="relative z-10 flex w-full items-center px-6 py-6 md:px-8 lg:px-10">
         <div className="nav-item flex items-center gap-3">
           <div className="grid h-9 w-9 place-content-center rounded-xl border border-blue-400/50 bg-blue-500/20 text-xs font-black text-blue-200 shadow-lg shadow-blue-950/50">CT</div>
           <p className="text-lg font-black tracking-tight">Thasyu create</p>
