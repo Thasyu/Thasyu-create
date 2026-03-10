@@ -47,14 +47,14 @@ export default function Home() {
         </div>
       </nav>
 
-      <main className="mx-auto flex w-full max-w-[1200px] flex-1 items-center justify-center px-6 py-10 md:px-10 md:py-14 lg:px-12">
-        <section className="w-full max-w-[980px] space-y-10 text-center md:space-y-12">
-          <h1 className="space-y-3 text-[clamp(2.8rem,8.4vw,7rem)] font-black leading-[1.05] tracking-tight">
+      <main className="mx-auto flex w-full max-w-[1200px] flex-1 items-center justify-center px-6 py-10 md:px-10 md:py-14 lg:px-12 lg:py-16">
+        <section className="w-full max-w-[980px] space-y-10 text-center md:space-y-12 lg:max-w-[1080px]">
+          <h1 className="space-y-3 text-[clamp(2.8rem,8.4vw,7rem)] font-black leading-[1.05] tracking-tight lg:text-[7.25rem] lg:leading-[1.02]">
             <span className="hero-title-line block">退屈な文字を、</span>
-            <span className="hero-title-line block text-blue-400">主役レベルに躍らせる。</span>
+            <span className="hero-title-line block text-blue-400 lg:whitespace-nowrap">主役レベルに躍らせる。</span>
           </h1>
 
-          <p className="hero-subtitle mx-auto max-w-3xl text-lg leading-relaxed text-zinc-300 md:text-2xl">
+          <p className="hero-subtitle mx-auto max-w-3xl text-lg leading-relaxed text-zinc-300 md:text-2xl lg:whitespace-nowrap">
             Thasyu create は、文字アニメーションをすばやく作れるプロジェクトです。
           </p>
 
