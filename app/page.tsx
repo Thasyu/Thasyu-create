@@ -39,15 +39,22 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="flex min-h-screen flex-col bg-black text-zinc-100">
-      <nav className="mx-auto flex w-full max-w-[1200px] items-center px-6 py-6 md:px-10 lg:px-12">
+    <div className="relative flex min-h-screen flex-col overflow-hidden bg-black text-zinc-100">
+      <div className="pointer-events-none absolute inset-0 z-0">
+        <div className="animated-bg-wave absolute inset-[-35%] opacity-90" />
+        <div className="animated-orb orb-one absolute -left-40 top-[-14%] h-[42rem] w-[42rem] rounded-full bg-blue-500/35 blur-[130px]" />
+        <div className="animated-orb-reverse orb-two absolute -right-36 top-[10%] h-[36rem] w-[36rem] rounded-full bg-cyan-400/25 blur-[130px]" />
+        <div className="animated-orb orb-three absolute bottom-[-30%] left-[16%] h-[44rem] w-[44rem] rounded-full bg-indigo-500/30 blur-[140px]" />
+      </div>
+
+      <nav className="relative z-10 mx-auto flex w-full max-w-[1200px] items-center px-6 py-6 md:px-10 lg:px-12">
         <div className="nav-item flex items-center gap-3">
           <div className="grid h-9 w-9 place-content-center rounded-xl border border-blue-400/50 bg-blue-500/20 text-xs font-black text-blue-200 shadow-lg shadow-blue-950/50">CT</div>
           <p className="text-lg font-black tracking-tight">Thasyu create</p>
         </div>
       </nav>
 
-      <main className="mx-auto flex w-full max-w-[1200px] flex-1 items-center justify-center px-6 py-10 md:px-10 md:py-14 lg:px-12 lg:py-16">
+      <main className="relative z-10 mx-auto flex w-full max-w-[1200px] flex-1 items-center justify-center px-6 py-10 md:px-10 md:py-14 lg:px-12 lg:py-16">
         <section className="w-full max-w-[980px] space-y-10 text-center md:space-y-12 lg:max-w-[1080px]">
           <h1 className="space-y-3 text-[clamp(2.8rem,8.4vw,7rem)] font-black leading-[1.05] tracking-tight lg:text-[7.25rem] lg:leading-[1.02]">
             <span className="hero-title-line block">退屈な文字を、</span>
@@ -69,7 +76,7 @@ export default function Home() {
         </section>
       </main>
 
-      <footer className="mx-auto w-full max-w-[1200px] px-6 pb-8 text-center text-sm text-zinc-500 md:px-10 lg:px-12">
+      <footer className="relative z-10 mx-auto w-full max-w-[1200px] px-6 pb-8 text-center text-sm text-zinc-500 md:px-10 lg:px-12">
         Thasyu create - Text Animation Studio
       </footer>
     </div>
