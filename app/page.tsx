@@ -66,16 +66,16 @@ export default function Home() {
             Thasyu create は、文字アニメーションをすばやく作れるプロジェクトです。
           </p>
 
-          <div className="hero-cta flex flex-wrap justify-center gap-4">
+          <div className="hero-cta relative z-20 flex flex-wrap justify-center gap-4 pointer-events-auto">
             <Link
               href="/editor"
-              className="rounded-2xl bg-blue-600 px-9 py-4 text-lg font-bold text-white transition hover:-translate-y-0.5 hover:bg-blue-500 hover:shadow-lg hover:shadow-blue-950/50"
+              className="touch-manipulation rounded-2xl bg-blue-600 px-9 py-4 text-lg font-bold text-white transition hover:-translate-y-0.5 hover:bg-blue-500 hover:shadow-lg hover:shadow-blue-950/50"
             >
               プロジェクトを始める
             </Link>
             <Link
               href="/dashboard"
-              className="rounded-2xl border border-blue-700/70 bg-zinc-900 px-9 py-4 text-lg font-semibold text-zinc-200 transition hover:border-blue-500"
+              className="touch-manipulation rounded-2xl border border-blue-700/70 bg-zinc-900 px-9 py-4 text-lg font-semibold text-zinc-200 transition hover:border-blue-500"
             >
               ドキュメントを見る
             </Link>
