@@ -1,11 +1,7 @@
 import { PrismaClient } from "@/app/generated/prisma/client";
 import { PrismaLibSql } from "@prisma/adapter-libsql";
 
-const databaseUrl = process.env.DATABASE_URL;
-
-if (!databaseUrl) {
-  throw new Error("DATABASE_URL is not set.");
-}
+const databaseUrl = process.env.DATABASE_URL ?? "file:./prisma/dev.db";
 
 const adapter = new PrismaLibSql({ url: databaseUrl });
 
