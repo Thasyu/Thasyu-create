@@ -3,7 +3,6 @@ import type { NextConfig } from "next";
 const repoName = "Thasyu-create";
 
 const nextConfig: NextConfig = {
-  output: "export",
   images: {
     unoptimized: true,
   },
