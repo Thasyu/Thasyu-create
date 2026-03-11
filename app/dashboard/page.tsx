@@ -143,7 +143,7 @@ export default function DashboardPage() {
 
                     <div className="flex items-center justify-end gap-2">
                       <Link
-                        href="/editor"
+                        href={`/editor/${project.id}`}
                         className="rounded-md border border-blue-500/60 px-3 py-1.5 text-xs font-semibold text-blue-200 transition hover:border-blue-400 hover:bg-blue-500/10"
                       >
                         開く
