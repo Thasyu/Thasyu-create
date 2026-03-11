@@ -40,12 +40,12 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="relative flex min-h-screen flex-col overflow-hidden bg-black text-zinc-100">
-      <div className="pointer-events-none absolute inset-0 z-0">
-        <div className="animated-bg-wave absolute inset-[-35%] opacity-90" />
-        <div className="animated-orb orb-one absolute -left-40 top-[-14%] h-[42rem] w-[42rem] rounded-full bg-blue-500/35 blur-[130px]" />
-        <div className="animated-orb-reverse orb-two absolute -right-36 top-[10%] h-[36rem] w-[36rem] rounded-full bg-cyan-400/25 blur-[130px]" />
-        <div className="animated-orb orb-three absolute bottom-[-30%] left-[16%] h-[44rem] w-[44rem] rounded-full bg-indigo-500/30 blur-[140px]" />
+    <div className="relative isolate flex min-h-screen flex-col overflow-hidden bg-black text-zinc-100">
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-[-1]">
+        <div className="animated-bg-wave pointer-events-none absolute inset-[-35%] opacity-90" />
+        <div className="animated-orb orb-one pointer-events-none absolute -left-40 top-[-14%] h-[42rem] w-[42rem] rounded-full bg-blue-500/35 blur-[130px]" />
+        <div className="animated-orb-reverse orb-two pointer-events-none absolute -right-36 top-[10%] h-[36rem] w-[36rem] rounded-full bg-cyan-400/25 blur-[130px]" />
+        <div className="animated-orb orb-three pointer-events-none absolute bottom-[-30%] left-[16%] h-[44rem] w-[44rem] rounded-full bg-indigo-500/30 blur-[140px]" />
       </div>
 
       <nav className="relative z-10 flex w-full items-center px-6 py-6 md:px-8 lg:px-10">
