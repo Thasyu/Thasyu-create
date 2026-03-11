@@ -16,6 +16,21 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Video Export (FFmpeg)
+
+This project includes a server-side render endpoint at `/api/render`.
+It converts the browser timeline JSON into an FFmpeg command and generates an MP4 in `public/renders`.
+
+### Prerequisite
+
+- Install FFmpeg and ensure `ffmpeg` is available in your PATH.
+
+### Usage
+
+- Open the editor page and click `Export MP4`.
+- The client sends timeline JSON (`clips`, `start`, `length`, `trimIn`, `track`, `zIndex`) to `/api/render`.
+- The server runs FFmpeg with `filter_complex` and returns a downloadable file URL like `/renders/<file>.mp4`.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

@@ -10,21 +10,29 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@libsql/client": "^0.17.0",
     "@prisma/adapter-libsql": "^7.4.2",
     "@prisma/client": "^7.4.2",
+    "@react-three/fiber": "^9.5.0",
+    "@remotion/player": "^4.0.434",
     "gsap": "^3.14.2",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
+    "remotion": "^4.0.434",
     "sqlite": "^5.1.1",
-    "sqlite3": "^5.1.7"
+    "sqlite3": "^5.1.7",
+    "three": "^0.183.2"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/three": "^0.183.1",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "prisma": "^7.4.2",
