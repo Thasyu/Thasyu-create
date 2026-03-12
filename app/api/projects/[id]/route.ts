@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-static";
+export const dynamicParams = false;
+
+const isGitHubPagesBuild = process.env.GITHUB_PAGES === "true";
+
 type RouteParams = {
   params: Promise<{ id: string }>;
 };
@@ -30,7 +35,15 @@ const parseContentBody = (body: unknown) => {
   return { content };
 };
 
+export async function generateStaticParams() {
+  return [{ id: "sample" }];
+}
+
 export async function GET(_: Request, { params }: RouteParams) {
+  if (isGitHubPagesBuild) {
+    return NextResponse.json({ error: "Not available on GitHub Pages." }, { status: 501 });
+  }
+
   const { id } = await params;
   const projectId = parseProjectId(id);
 
@@ -50,6 +63,10 @@ export async function GET(_: Request, { params }: RouteParams) {
 }
 
 export async function PATCH(request: Request, { params }: RouteParams) {
+  if (isGitHubPagesBuild) {
+    return NextResponse.json({ error: "Not available on GitHub Pages." }, { status: 501 });
+  }
+
   const { id } = await params;
   const projectId = parseProjectId(id);
 
@@ -83,6 +100,10 @@ export async function PUT(request: Request, context: RouteParams) {
 }
 
 export async function DELETE(_: Request, { params }: RouteParams) {
+  if (isGitHubPagesBuild) {
+    return NextResponse.json({ error: "Not available on GitHub Pages." }, { status: 501 });
+  }
+
   const { id } = await params;
   const projectId = parseProjectId(id);
 

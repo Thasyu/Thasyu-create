@@ -5,6 +5,9 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
+export const dynamic = "force-static";
+
+const isGitHubPagesBuild = process.env.GITHUB_PAGES === "true";
 
 type TransitionType = "none" | "fade" | "dissolve" | "slide" | "glitch" | "pixelate" | "rgbShift";
 
@@ -149,6 +152,10 @@ const runFfmpeg = async (args: string[]): Promise<void> => {
 };
 
 export async function POST(request: Request) {
+	if (isGitHubPagesBuild) {
+		return NextResponse.json({ error: "Not available on GitHub Pages." }, { status: 501 });
+	}
+
 	const body = await request.json().catch(() => null);
 	const parsed = parseBody(body);
 	if (!parsed.ok) {
