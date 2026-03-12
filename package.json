@@ -7,6 +7,7 @@
     "prebuild": "prisma generate",
     "build": "next build",
     "build:pages": "node scripts/build-pages.mjs",
+    "prebuild:pages:next": "prisma generate",
     "build:pages:next": "next build",
     "start": "next start",
     "lint": "eslint"
