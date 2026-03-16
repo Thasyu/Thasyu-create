@@ -620,7 +620,7 @@ export async function POST(request: Request) {
 		const escapedFontPattern = escapeDrawText(fontPattern);
 		const lineSpacing = Math.max(0, Math.round(clip.fontSize * (clip.lineHeight - 1)));
 		const xExpression = `(w*${clip.x.toFixed(3)}-text_w/2)`;
-		const yExpression = `(h-text_h)*${clip.y.toFixed(3)}`;
+		const yExpression = `(h*${clip.y.toFixed(3)}-text_h/2)`;
 		const inEnd = clip.start + clip.inDuration;
 		const outStart = clip.end - clip.outDuration;
 		const inProgress = `(t-${clip.start.toFixed(3)})/${Math.max(clip.inDuration, 0.001).toFixed(3)}`;

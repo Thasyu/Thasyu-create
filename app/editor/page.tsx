@@ -879,7 +879,7 @@ const drawTextClip = (
 
 	context.globalAlpha = alpha * clip.opacity;
 	context.textAlign = "left";
-	context.textBaseline = "middle";
+	context.textBaseline = "alphabetic";
 	if (!pixelatePower) {
 		context.fillStyle = clip.color;
 	}
@@ -903,9 +903,9 @@ const drawTextClip = (
 		}
 		context.fillText(text, x, y);
 	};
-	const drawTextWithLetterSpacing = (text: string, startX: number, centerY: number): void => {
+	const drawTextWithLetterSpacing = (text: string, startX: number, baselineY: number): void => {
 		if (Math.abs(letterSpacingPx) < 0.001 || text.length <= 1) {
-			drawTextWithOutline(text, startX, centerY);
+			drawTextWithOutline(text, startX, baselineY);
 			return;
 		}
 
@@ -915,7 +915,7 @@ const drawTextClip = (
 
 		characters.forEach((character, index) => {
 			const charWidth = widths[index];
-			drawTextWithOutline(character, cursorX, centerY);
+			drawTextWithOutline(character, cursorX, baselineY);
 			cursorX += charWidth + letterSpacingPx;
 		});
 	};
@@ -935,16 +935,21 @@ const drawTextClip = (
 	};
 	const lineWidths = lines.map(getLineWidth);
 	const blockWidth = Math.max(...lineWidths, 0);
-	const getLineGlyphHeight = (line: string): number => {
-		const sample = line.length > 0 ? line : "Mg";
+	const getSharedGlyphMetrics = (): { ascent: number; descent: number } => {
+		const compactText = transformedText.replace(/\s+/g, "");
+		const sample = compactText.length > 0 ? Array.from(compactText).slice(0, 48).join("") : "Ag";
 		const measured = context.measureText(sample);
 		const ascent =
 			measured.actualBoundingBoxAscent ?? measured.fontBoundingBoxAscent ?? Math.max(12, clip.fontSize) * 0.8;
 		const descent =
 			measured.actualBoundingBoxDescent ?? measured.fontBoundingBoxDescent ?? Math.max(12, clip.fontSize) * 0.2;
-		return Math.max(1, ascent + descent);
+		return {
+			ascent: Math.max(0, ascent),
+			descent: Math.max(0, descent),
+		};
 	};
-	const lineGlyphHeights = lines.map(getLineGlyphHeight);
+	const sharedGlyphMetrics = getSharedGlyphMetrics();
+	const lineGlyphMetrics = lines.map(() => sharedGlyphMetrics);
 	const getLineStartX = (lineWidth: number): number => {
 		const blockLeft = drawX - blockWidth / 2;
 		if (clip.textAlign === "left") {
@@ -955,19 +960,23 @@ const drawTextClip = (
 		}
 		return blockLeft + (blockWidth - lineWidth) / 2;
 	};
-	const lineHeight = Math.max(12, clip.fontSize) * clip.lineHeight;
-	const firstLineY = drawY - ((lines.length - 1) * lineHeight) / 2;
+	const lineAdvance = Math.max(12, clip.fontSize) * clip.lineHeight;
+	const sharedAscent = sharedGlyphMetrics.ascent;
+	const sharedDescent = sharedGlyphMetrics.descent;
+	const firstBaselineY =
+		drawY - (((lines.length - 1) * lineAdvance) + (sharedDescent - sharedAscent)) / 2;
+	const lineBaselineYs = lines.map((_, lineIndex) => firstBaselineY + lineIndex * lineAdvance);
+	const textBlockTop = lines.reduce((minimum, _line, lineIndex) => {
+		const baselineY = lineBaselineYs[lineIndex] ?? drawY;
+		const metrics = lineGlyphMetrics[lineIndex] ?? { ascent: Math.max(12, clip.fontSize) * 0.8, descent: Math.max(12, clip.fontSize) * 0.2 };
+		return Math.min(minimum, baselineY - metrics.ascent);
+	}, Number.POSITIVE_INFINITY);
+	const textBlockBottom = lines.reduce((maximum, _line, lineIndex) => {
+		const baselineY = lineBaselineYs[lineIndex] ?? drawY;
+		const metrics = lineGlyphMetrics[lineIndex] ?? { ascent: Math.max(12, clip.fontSize) * 0.8, descent: Math.max(12, clip.fontSize) * 0.2 };
+		return Math.max(maximum, baselineY + metrics.descent);
+	}, Number.NEGATIVE_INFINITY);
 	if (clip.backgroundEnabled && (clip.backgroundOpacity > 0 || clip.backgroundBorderWidth > 0)) {
-		const textBlockTop = lines.reduce((minimum, _line, lineIndex) => {
-			const lineCenterY = firstLineY + lineIndex * lineHeight;
-			const glyphHeight = lineGlyphHeights[lineIndex] ?? Math.max(12, clip.fontSize);
-			return Math.min(minimum, lineCenterY - glyphHeight / 2);
-		}, Number.POSITIVE_INFINITY);
-		const textBlockBottom = lines.reduce((maximum, _line, lineIndex) => {
-			const lineCenterY = firstLineY + lineIndex * lineHeight;
-			const glyphHeight = lineGlyphHeights[lineIndex] ?? Math.max(12, clip.fontSize);
-			return Math.max(maximum, lineCenterY + glyphHeight / 2);
-		}, Number.NEGATIVE_INFINITY);
 		const textBlockHeight = Math.max(1, textBlockBottom - textBlockTop);
 		const backgroundLeft = drawX - blockWidth / 2 - clip.backgroundPaddingX;
 		const backgroundTop = textBlockTop - clip.backgroundPaddingY;
@@ -1018,7 +1027,7 @@ const drawTextClip = (
 	if (glitchCharacterChaos && clip.text.replace(/\r?\n/g, "").length > 1) {
 		let characterOffset = 0;
 		lines.forEach((line, lineIndex) => {
-			const lineY = firstLineY + lineIndex * lineHeight;
+			const lineY = lineBaselineYs[lineIndex] ?? drawY;
 			const characters = Array.from(line);
 			if (characters.length === 0) {
 				return;
@@ -1044,7 +1053,7 @@ const drawTextClip = (
 			const lineWidth = lineWidths[lineIndex] ?? 0;
 			const lineStartXBase = getLineStartX(lineWidth);
 			const lineStartX = pixelatePower > 0 ? quantizeToStep(lineStartXBase, Math.max(1, pixelateCellSize)) : lineStartXBase;
-			const lineYBase = firstLineY + lineIndex * lineHeight;
+			const lineYBase = lineBaselineYs[lineIndex] ?? drawY;
 			const lineY = pixelatePower > 0 ? quantizeToStep(lineYBase, Math.max(1, pixelateCellSize)) : lineYBase;
 			drawTextWithLetterSpacing(line, lineStartX, lineY);
 		});
