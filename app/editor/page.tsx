@@ -1613,7 +1613,7 @@ export default function EditorPage() {
 	const openClipSettings = useCallback(
 		(clipId: string) => {
 			setSelectedClipId(clipId);
-			router.push(`/editor/clip/${clipId}`);
+			router.push("/editor/clip/sample");
 		},
 		[router]
 	);
