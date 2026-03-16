@@ -9,6 +9,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { useRouter } from "next/navigation";
 import {
 	DndContext,
 	DragEndEvent,
@@ -20,20 +21,50 @@ import {
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { Player } from "@remotion/player";
-import { AbsoluteFill, Sequence, useCurrentFrame } from "remotion";
 import * as THREE from "three";
+import {
+	readEditorClips,
+	readEditorSelectedClipId,
+	writeEditorClips,
+	writeEditorSelectedClipId,
+} from "@/lib/editorClipStorage";
 
-type TransitionType = "none" | "fade" | "dissolve" | "slide" | "glitch" | "pixelate" | "rgbShift";
+type TransitionType = "none" | "fade" | "slide" | "pixelate" | "rgbShift";
+type TransitionEasing = "linear" | "easeIn" | "easeOut" | "easeInOut";
+type AccentEffect = "none" | "glitch";
+type LegacyRgbShiftChannelMapping = "r-gb" | "rg-b" | "r-g-b";
+type LetterSpacingUnit = "px" | "em";
+type TextAlignMode = "left" | "center" | "right";
+type TextTransformMode = "none" | "uppercase" | "lowercase";
 
 type ClipTransitionPoint = {
 	duration: number;
 	effect: TransitionType;
+	easing: TransitionEasing;
+	slideX: number;
+	slideY: number;
+	glitchIntensity: number;
+	glitchSpeed: number;
+	glitchChromaticAberration: number;
+	glitchCharacterChaos: boolean;
+	pixelateMaxSize: number;
+	pixelateResolution: number;
+	rgbShiftAngle: number;
+	rgbShiftOffset: number;
+	rgbShiftColorA: string;
+	rgbShiftColorB: string;
 };
 
 type ClipTransitions = {
 	inPoint: ClipTransitionPoint;
 	outPoint: ClipTransitionPoint;
+};
+
+type ClipAccent = {
+	effect: AccentEffect;
+	triggerTime: number;
+	duration: number;
+	intensity: number;
 };
 
 type TextAsset = {
@@ -55,9 +86,39 @@ type ClipItem = {
 	zIndex: number;
 	color: string;
 	fontSize: number;
+	fontFamily: string;
+	fontWeight: number;
+		textTransform: TextTransformMode;
+	textAlign: TextAlignMode;
+	strokeColor: string;
+	strokeWidth: number;
+	letterSpacing: number;
+	letterSpacingUnit: LetterSpacingUnit;
+	lineHeight: number;
+	opacity: number;
+	shadowColor: string;
+	shadowBlur: number;
+	shadowOffsetX: number;
+	shadowOffsetY: number;
+	shadowOpacity: number;
+	shadowEnabled: boolean;
+	glowColor: string;
+	glowStrength: number;
+	glowEnabled: boolean;
+	glowBlur: number;
+	glowOpacity: number;
+	backgroundColor: string;
+	backgroundPaddingX: number;
+	backgroundPaddingY: number;
+	backgroundRadius: number;
+	backgroundEnabled: boolean;
+	backgroundOpacity: number;
+	backgroundBorderColor: string;
+	backgroundBorderWidth: number;
 	positionX: number;
 	positionY: number;
 	transitions: ClipTransitions;
+	accent: ClipAccent;
 };
 
 type TrimEdge = "start" | "end";
@@ -70,14 +131,13 @@ type TrimState = {
 	originLength: number;
 };
 
+type ActiveRenderClip = {
+	clip: ClipItem;
+	localTime: number;
+};
+
 type LayerState = {
-	baseClip?: ClipItem;
-	overlayClip?: ClipItem;
-	baseLocalTime: number;
-	overlayLocalTime: number;
-	progress: number;
-	effectType: TransitionType;
-	hasOverlay: boolean;
+	activeClips: ActiveRenderClip[];
 };
 
 const FPS = 30;
@@ -85,77 +145,546 @@ const PIXELS_PER_SECOND = 80;
 const TRACK_COUNT = 4;
 const MIN_CLIP_LENGTH = 0.25;
 
-const transitionTypes: TransitionType[] = [
-	"none",
-	"fade",
-	"dissolve",
-	"slide",
-	"glitch",
-	"pixelate",
-	"rgbShift",
-];
-
 const textAssets: TextAsset[] = [
 	{ id: "asset-title", name: "Title", text: "NEW EPISODE", color: "#ffffff", fontSize: 82 },
 	{ id: "asset-sub", name: "Subtitle", text: "Powered by Character Transitions", color: "#7dd3fc", fontSize: 44 },
 	{ id: "asset-call", name: "Callout", text: "LIMITED TIME", color: "#fca5a5", fontSize: 64 },
 ];
 
-const initialClips: ClipItem[] = [
-	{
-		id: "clip-1",
-		assetId: "asset-title",
-		name: "Title",
-		text: "NEW EPISODE",
-		start: 0.5,
-		length: 3.5,
-		track: 0,
-		zIndex: 1,
-		color: "#ffffff",
-		fontSize: 84,
-		positionX: 0.5,
-		positionY: 0.45,
-		transitions: {
-			inPoint: { duration: 0.6, effect: "dissolve" },
-			outPoint: { duration: 0.8, effect: "rgbShift" },
-		},
-	},
-	{
-		id: "clip-2",
-		assetId: "asset-sub",
-		name: "Subtitle",
-		text: "Powered by Character Transitions",
-		start: 2,
-		length: 4,
-		track: 1,
-		zIndex: 2,
-		color: "#7dd3fc",
-		fontSize: 42,
-		positionX: 0.5,
-		positionY: 0.65,
-		transitions: {
-			inPoint: { duration: 0.5, effect: "slide" },
-			outPoint: { duration: 1, effect: "glitch" },
-		},
-	},
-];
+const initialClips: ClipItem[] = [];
 
 const effectCodeMap: Record<TransitionType, number> = {
 	none: 0,
 	fade: 1,
-	dissolve: 2,
-	slide: 3,
-	glitch: 4,
-	pixelate: 5,
-	rgbShift: 6,
+	slide: 2,
+	pixelate: 4,
+	rgbShift: 5,
+};
+
+const transitionTypes: TransitionType[] = ["none", "fade", "slide", "pixelate", "rgbShift"];
+const transitionEasingTypes: TransitionEasing[] = ["linear", "easeIn", "easeOut", "easeInOut"];
+const accentEffects: AccentEffect[] = ["none", "glitch"];
+const rgbShiftLegacyChannelMappings: LegacyRgbShiftChannelMapping[] = ["r-gb", "rg-b", "r-g-b"];
+const availableFonts = [
+	"Inter",
+	"Roboto",
+	"Poppins",
+	"Montserrat",
+	"Bebas Neue",
+	"Anton",
+	"Oswald",
+	"Noto Sans JP",
+	"M PLUS 1p",
+	"Zen Maru Gothic",
+	"Kosugi",
+	"Noto Serif JP",
+	"Playfair Display",
+	"Pacifico",
+	"Dancing Script",
+];
+const availableFontSet = new Set(availableFonts);
+const defaultFontFamily = "Inter";
+const fontWeightOptions = [300, 400, 500, 700, 900] as const;
+type FontWeightValue = (typeof fontWeightOptions)[number];
+const defaultFontWeight: FontWeightValue = 700;
+const fontWeightsByFamily: Record<string, readonly FontWeightValue[]> = {
+	Inter: [300, 400, 500, 700, 900],
+	Roboto: [300, 400, 500, 700, 900],
+	Poppins: [300, 400, 500, 700, 900],
+	Montserrat: [300, 400, 500, 700, 900],
+	"Bebas Neue": [400],
+	Anton: [400],
+	Oswald: [300, 400, 500, 700],
+	"Noto Sans JP": [300, 400, 500, 700, 900],
+	"M PLUS 1p": [300, 400, 500, 700, 900],
+	"Zen Maru Gothic": [300, 400, 500, 700, 900],
+	Kosugi: [400],
+	"Noto Serif JP": [300, 400, 500, 700, 900],
+	"Playfair Display": [400, 500, 700, 900],
+	Pacifico: [400],
+	"Dancing Script": [400, 500, 700],
+};
+
+const isTransitionType = (value: unknown): value is TransitionType => {
+	return transitionTypes.includes(value as TransitionType);
+};
+
+const isTransitionEasing = (value: unknown): value is TransitionEasing => {
+	return transitionEasingTypes.includes(value as TransitionEasing);
+};
+
+const isAccentEffect = (value: unknown): value is AccentEffect => {
+	return accentEffects.includes(value as AccentEffect);
+};
+
+const isLegacyRgbShiftChannelMapping = (value: unknown): value is LegacyRgbShiftChannelMapping => {
+	return rgbShiftLegacyChannelMappings.includes(value as LegacyRgbShiftChannelMapping);
+};
+
+const isHexColor = (value: unknown): value is string => {
+	return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value);
+};
+
+const isLetterSpacingUnit = (value: unknown): value is LetterSpacingUnit => {
+	return value === "px" || value === "em";
+};
+
+const isTextAlignMode = (value: unknown): value is TextAlignMode => {
+	return value === "left" || value === "center" || value === "right";
+};
+
+const isTextTransformMode = (value: unknown): value is TextTransformMode => {
+	return value === "none" || value === "uppercase" || value === "lowercase";
+};
+
+const toFontFamily = (value: unknown): string => {
+	if (typeof value !== "string") {
+		return defaultFontFamily;
+	}
+	return availableFontSet.has(value) ? value : defaultFontFamily;
+};
+
+const getSupportedFontWeights = (fontFamily: string): readonly FontWeightValue[] => {
+	return fontWeightsByFamily[fontFamily] ?? fontWeightOptions;
+};
+
+const toFontWeight = (value: unknown, fontFamily: string): FontWeightValue => {
+	const supportedWeights = getSupportedFontWeights(fontFamily);
+	const numeric = Number(value);
+	if (supportedWeights.includes(numeric as FontWeightValue)) {
+		return numeric as FontWeightValue;
+	}
+	if (supportedWeights.includes(defaultFontWeight)) {
+		return defaultFontWeight;
+	}
+	return supportedWeights[0] ?? 400;
+};
+
+const toLetterSpacingUnit = (value: unknown): LetterSpacingUnit => {
+	return isLetterSpacingUnit(value) ? value : "em";
+};
+
+const toTextAlignMode = (value: unknown): TextAlignMode => {
+	return isTextAlignMode(value) ? value : "center";
+};
+
+const toTextTransformMode = (value: unknown): TextTransformMode => {
+	return isTextTransformMode(value) ? value : "none";
+};
+
+const applyTextTransform = (text: string, mode: TextTransformMode): string => {
+	switch (mode) {
+		case "uppercase":
+			return text.toUpperCase();
+		case "lowercase":
+			return text.toLowerCase();
+		case "none":
+		default:
+			return text;
+	}
+};
+
+const toLetterSpacing = (value: unknown, unit: LetterSpacingUnit): number => {
+	const numeric = toFiniteNumber(value, 0);
+	if (unit === "em") {
+		return clamp(numeric, -0.1, 1);
+	}
+	return clamp(numeric, -10, 160);
+};
+
+const toLineHeight = (value: unknown): number => {
+	return clamp(toFiniteNumber(value, 1.2), 0, 2);
+};
+
+const toStrokeWidth = (value: unknown): number => {
+	return clamp(toFiniteNumber(value, 0), 0, 5);
+};
+
+const toOpacity = (value: unknown): number => {
+	return clamp(toFiniteNumber(value, 1), 0, 1);
+};
+
+const toShadowBlur = (value: unknown): number => {
+	return clamp(toFiniteNumber(value, 14), 0, 100);
+};
+
+const toShadowOffset = (value: unknown): number => {
+	return clamp(toFiniteNumber(value, 0), -200, 200);
+};
+
+const toShadowOpacity = (value: unknown): number => {
+	return clamp(toFiniteNumber(value, 0.45), 0, 1);
+};
+
+const toShadowEnabled = (value: unknown): boolean => {
+	if (typeof value === "boolean") {
+		return value;
+	}
+	return true;
+};
+
+const toGlowStrength = (value: unknown): number => {
+	return clamp(toFiniteNumber(value, 1), 0, 5);
+};
+
+const toGlowBlur = (value: unknown): number => {
+	return clamp(toFiniteNumber(value, 24), 0, 120);
+};
+
+const toGlowOpacity = (value: unknown): number => {
+	return clamp(toFiniteNumber(value, 0.7), 0, 1);
+};
+
+const toGlowEnabled = (value: unknown): boolean => {
+	if (typeof value === "boolean") {
+		return value;
+	}
+	return false;
+};
+
+const toBackgroundPaddingX = (value: unknown): number => {
+	return clamp(toFiniteNumber(value, 16), 0, 200);
+};
+
+const toBackgroundPaddingY = (value: unknown): number => {
+	return clamp(toFiniteNumber(value, 8), 0, 200);
+};
+
+const toBackgroundRadius = (value: unknown): number => {
+	return clamp(toFiniteNumber(value, 12), 0, 200);
+};
+
+const toBackgroundEnabled = (value: unknown): boolean => {
+	if (typeof value === "boolean") {
+		return value;
+	}
+	return false;
+};
+
+const toBackgroundOpacity = (value: unknown): number => {
+	return clamp(toFiniteNumber(value, 0.55), 0, 1);
+};
+
+const toBackgroundBorderWidth = (value: unknown): number => {
+	return clamp(toFiniteNumber(value, 0), 0, 20);
+};
+
+const isSlideDirection = (value: unknown): value is "left" | "right" | "up" | "down" => {
+	return value === "left" || value === "right" || value === "up" || value === "down";
 };
 
 const clamp = (value: number, min: number, max: number): number => {
 	return Math.min(Math.max(value, min), max);
 };
 
+const toFiniteNumber = (value: unknown, fallback: number): number => {
+	const parsed = Number(value);
+	return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const clampRatio = (value: number): number => {
+	return clamp(value, 0, 1);
+};
+
+const clampGlitchIntensity = (value: number): number => {
+	return clamp(value, 0, 1);
+};
+
+const clampGlitchSpeed = (value: number): number => {
+	return clamp(value, 0.1, 100);
+};
+
+const clampGlitchChromaticAberration = (value: number): number => {
+	return clamp(value, 0, 20);
+};
+
+const clampPixelateMaxSize = (value: number): number => {
+	return clamp(value, 1, 100);
+};
+
+const clampPixelateResolution = (value: number): number => {
+	return clamp(value, 0, 1);
+};
+
+const clampRgbShiftAngle = (value: number): number => {
+	const normalized = toFiniteNumber(value, 0) % 360;
+	return normalized < 0 ? normalized + 360 : normalized;
+};
+
+const clampRgbShiftOffset = (value: number): number => {
+	return clamp(value, 0, 50);
+};
+
+const getRgbShiftLegacyColors = (mapping: unknown): { colorA: string; colorB: string } => {
+	if (!isLegacyRgbShiftChannelMapping(mapping)) {
+		return { colorA: "#ff005a", colorB: "#00e1ff" };
+	}
+
+	switch (mapping) {
+		case "rg-b":
+			return { colorA: "#ffdc5a", colorB: "#4682ff" };
+		case "r-g-b":
+			return { colorA: "#ff5a5a", colorB: "#508cff" };
+		case "r-gb":
+		default:
+			return { colorA: "#ff005a", colorB: "#00e1ff" };
+	}
+};
+
+const quantizeToStep = (value: number, step: number): number => {
+	if (step <= 0) {
+		return value;
+	}
+	return Math.round(value / step) * step;
+};
+
+const drawRoundedRect = (
+	context: CanvasRenderingContext2D,
+	x: number,
+	y: number,
+	width: number,
+	height: number,
+	radius: number
+): void => {
+	const safeWidth = Math.max(0, width);
+	const safeHeight = Math.max(0, height);
+	const safeRadius = Math.min(Math.max(0, radius), safeWidth / 2, safeHeight / 2);
+	context.beginPath();
+	if (safeRadius <= 0) {
+		context.rect(x, y, safeWidth, safeHeight);
+		return;
+	}
+	context.moveTo(x + safeRadius, y);
+	context.lineTo(x + safeWidth - safeRadius, y);
+	context.quadraticCurveTo(x + safeWidth, y, x + safeWidth, y + safeRadius);
+	context.lineTo(x + safeWidth, y + safeHeight - safeRadius);
+	context.quadraticCurveTo(x + safeWidth, y + safeHeight, x + safeWidth - safeRadius, y + safeHeight);
+	context.lineTo(x + safeRadius, y + safeHeight);
+	context.quadraticCurveTo(x, y + safeHeight, x, y + safeHeight - safeRadius);
+	context.lineTo(x, y + safeRadius);
+	context.quadraticCurveTo(x, y, x + safeRadius, y);
+};
+
+const getSlidePointByDirection = (
+	direction: "left" | "right" | "up" | "down",
+	anchorX: number,
+	anchorY: number
+): { x: number; y: number } => {
+	switch (direction) {
+		case "left":
+			return { x: 0, y: anchorY };
+		case "right":
+			return { x: 1, y: anchorY };
+		case "up":
+			return { x: anchorX, y: 0 };
+		case "down":
+		default:
+			return { x: anchorX, y: 1 };
+	}
+};
+
+const applyEasing = (progress: number, easing: TransitionEasing): number => {
+	const t = clamp(progress, 0, 1);
+	switch (easing) {
+		case "easeIn":
+			return t * t;
+		case "easeOut":
+			return 1 - (1 - t) * (1 - t);
+		case "easeInOut":
+			return t < 0.5 ? 2 * t * t : 1 - (Math.pow(-2 * t + 2, 2) / 2);
+		case "linear":
+		default:
+			return t;
+	}
+};
+
+const getEasedTransitionIntensity = (
+	intensity: number,
+	source: "in" | "out",
+	easing: TransitionEasing
+): number => {
+	const progress = source === "in" ? 1 - intensity : intensity;
+	const easedProgress = applyEasing(progress, easing);
+	return source === "in" ? 1 - easedProgress : easedProgress;
+};
+
+const getAccentGlitchIntensityAtTime = (accent: ClipAccent, localTime: number): number => {
+	if (accent.effect !== "glitch" || accent.duration <= 0) {
+		return 0;
+	}
+
+	const end = accent.triggerTime + accent.duration;
+	if (localTime < accent.triggerTime || localTime > end) {
+		return 0;
+	}
+
+	const progress = clamp((localTime - accent.triggerTime) / Math.max(accent.duration, 0.001), 0, 1);
+	return Math.sin(Math.PI * progress) * clampGlitchIntensity(accent.intensity);
+};
+
 const quantizeQuarter = (value: number): number => {
 	return Math.round(value * 4) / 4;
+};
+
+const lerp = (start: number, end: number, progress: number): number => {
+	return start + (end - start) * progress;
+};
+
+const hexToRgba = (hexColor: string, alpha: number): string => {
+	const match = /^#([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hexColor);
+	if (!match) {
+		return `rgba(255,255,255,${alpha})`;
+	}
+	return `rgba(${Number.parseInt(match[1], 16)},${Number.parseInt(match[2], 16)},${Number.parseInt(match[3], 16)},${alpha})`;
+};
+
+const getRgbShiftShadow = (
+	offsetX: number,
+	offsetY: number,
+	colorA: string,
+	colorB: string,
+	alpha = 0.72
+): string => {
+	const glow = "0 2px 10px rgba(0,0,0,0.55)";
+	const dx = offsetX.toFixed(2);
+	const dy = offsetY.toFixed(2);
+	const ndx = (-offsetX).toFixed(2);
+	const ndy = (-offsetY).toFixed(2);
+	const primaryColor = colorA;
+	const secondaryColor = colorB;
+	return `${dx}px ${dy}px ${hexToRgba(primaryColor, alpha)}, ${ndx}px ${ndy}px ${hexToRgba(secondaryColor, alpha)}, ${glow}`;
+};
+
+const normalizeTransitionPoint = (
+	point: unknown,
+	source: "in" | "out",
+	anchorX: number,
+	anchorY: number
+): ClipTransitionPoint => {
+	const rawPoint = point && typeof point === "object" ? (point as Record<string, unknown>) : {};
+	const effectValue = rawPoint.effect;
+	const normalizedEffect = effectValue === "dissolve" ? "fade" : effectValue === "glitch" ? "none" : effectValue;
+	const easingValue = rawPoint.easing;
+	const legacyRgbShiftMappingValue = rawPoint.rgbShiftChannelMapping;
+	const legacyRgbColors = getRgbShiftLegacyColors(legacyRgbShiftMappingValue);
+	const directionValue = rawPoint.slideDirection;
+	const normalizedDirection = isSlideDirection(directionValue) ? directionValue : "left";
+	const presetPoint = getSlidePointByDirection(normalizedDirection, anchorX, anchorY);
+	const legacyOffsetX = source === "in" ? rawPoint.slideOffsetStartX : rawPoint.slideOffsetEndX;
+	const legacyOffsetY = source === "in" ? rawPoint.slideOffsetStartY : rawPoint.slideOffsetEndY;
+	const slideXFallback = anchorX + toFiniteNumber(legacyOffsetX, presetPoint.x - anchorX);
+	const slideYFallback = anchorY + toFiniteNumber(legacyOffsetY, presetPoint.y - anchorY);
+	return {
+		duration: Math.max(0, toFiniteNumber(rawPoint.duration, 0)),
+		effect: isTransitionType(normalizedEffect) ? normalizedEffect : "none",
+		easing: isTransitionEasing(easingValue) ? easingValue : "linear",
+		slideX: clampRatio(toFiniteNumber(rawPoint.slideX, slideXFallback)),
+		slideY: clampRatio(toFiniteNumber(rawPoint.slideY, slideYFallback)),
+		glitchIntensity: clampGlitchIntensity(toFiniteNumber(rawPoint.glitchIntensity, 0.65)),
+		glitchSpeed: clampGlitchSpeed(toFiniteNumber(rawPoint.glitchSpeed, 24)),
+		glitchChromaticAberration: clampGlitchChromaticAberration(toFiniteNumber(rawPoint.glitchChromaticAberration, 6)),
+		glitchCharacterChaos: Boolean(rawPoint.glitchCharacterChaos),
+		pixelateMaxSize: clampPixelateMaxSize(toFiniteNumber(rawPoint.pixelateMaxSize, 48)),
+		pixelateResolution: clampPixelateResolution(toFiniteNumber(rawPoint.pixelateResolution, 0.45)),
+		rgbShiftAngle: clampRgbShiftAngle(toFiniteNumber(rawPoint.rgbShiftAngle, 0)),
+		rgbShiftOffset: clampRgbShiftOffset(toFiniteNumber(rawPoint.rgbShiftOffset, 24)),
+		rgbShiftColorA: isHexColor(rawPoint.rgbShiftColorA) ? rawPoint.rgbShiftColorA : legacyRgbColors.colorA,
+		rgbShiftColorB: isHexColor(rawPoint.rgbShiftColorB) ? rawPoint.rgbShiftColorB : legacyRgbColors.colorB,
+	};
+};
+
+const normalizeAccentByLength = (accent: unknown, length: number): ClipAccent => {
+	const rawAccent = accent && typeof accent === "object" ? (accent as Record<string, unknown>) : {};
+	const triggerTime = clamp(toFiniteNumber(rawAccent.triggerTime, 0), 0, length);
+	const maxDuration = Math.max(0, length - triggerTime);
+	return {
+		effect: isAccentEffect(rawAccent.effect) ? rawAccent.effect : "none",
+		triggerTime,
+		duration: clamp(toFiniteNumber(rawAccent.duration, 0.2), 0, maxDuration),
+		intensity: clampGlitchIntensity(toFiniteNumber(rawAccent.intensity, 0.8)),
+	};
+};
+
+const normalizeTransitionsByLength = (transitions: ClipTransitions, length: number): ClipTransitions => {
+	const inDuration = clamp(transitions.inPoint.duration, 0, length);
+	const outDuration = clamp(transitions.outPoint.duration, 0, length);
+	const total = inDuration + outDuration;
+
+	if (total <= length || total === 0) {
+		return {
+			inPoint: { ...transitions.inPoint, duration: inDuration, easing: transitions.inPoint.easing ?? "linear" },
+			outPoint: { ...transitions.outPoint, duration: outDuration, easing: transitions.outPoint.easing ?? "linear" },
+		};
+	}
+
+	const scale = length / total;
+	return {
+		inPoint: {
+			...transitions.inPoint,
+			duration: Number((inDuration * scale).toFixed(3)),
+			easing: transitions.inPoint.easing ?? "linear",
+		},
+		outPoint: {
+			...transitions.outPoint,
+			duration: Number((outDuration * scale).toFixed(3)),
+			easing: transitions.outPoint.easing ?? "linear",
+		},
+	};
+};
+
+const normalizeClip = (clip: ClipItem): ClipItem => {
+	const normalizedLength = Math.max(toFiniteNumber(clip.length, MIN_CLIP_LENGTH), MIN_CLIP_LENGTH);
+	const normalizedPositionX = clamp(toFiniteNumber(clip.positionX, 0.5), 0, 1);
+	const normalizedPositionY = clamp(toFiniteNumber(clip.positionY, 0.5), 0, 1);
+	const normalizedFontFamily = toFontFamily(clip.fontFamily);
+	const normalizedLetterSpacingUnit = toLetterSpacingUnit(clip.letterSpacingUnit);
+	const normalizedTextAlign = toTextAlignMode(clip.textAlign);
+	const normalizedTextTransform = toTextTransformMode(clip.textTransform);
+	const rawTransitions = clip.transitions && typeof clip.transitions === "object" ? clip.transitions : ({} as ClipTransitions);
+	const rawAccent = clip.accent && typeof clip.accent === "object" ? clip.accent : {};
+	return {
+		...clip,
+		length: normalizedLength,
+		fontFamily: normalizedFontFamily,
+		fontWeight: toFontWeight(clip.fontWeight, normalizedFontFamily),
+		textTransform: normalizedTextTransform,
+		textAlign: normalizedTextAlign,
+		strokeColor: isHexColor(clip.strokeColor) ? clip.strokeColor : "#000000",
+		strokeWidth: toStrokeWidth(clip.strokeWidth),
+		letterSpacingUnit: normalizedLetterSpacingUnit,
+		letterSpacing: toLetterSpacing(clip.letterSpacing, normalizedLetterSpacingUnit),
+		lineHeight: toLineHeight(clip.lineHeight),
+		opacity: toOpacity(clip.opacity),
+		shadowColor: isHexColor(clip.shadowColor) ? clip.shadowColor : "#000000",
+		shadowBlur: toShadowBlur(clip.shadowBlur),
+		shadowOffsetX: toShadowOffset(clip.shadowOffsetX),
+		shadowOffsetY: toShadowOffset(clip.shadowOffsetY),
+		shadowOpacity: toShadowOpacity(clip.shadowOpacity),
+		shadowEnabled: toShadowEnabled(clip.shadowEnabled),
+		glowColor: isHexColor(clip.glowColor) ? clip.glowColor : "#60a5fa",
+		glowStrength: toGlowStrength(clip.glowStrength),
+		glowEnabled: toGlowEnabled(clip.glowEnabled),
+		glowBlur: toGlowBlur(clip.glowBlur),
+		glowOpacity: toGlowOpacity(clip.glowOpacity),
+		backgroundColor: isHexColor(clip.backgroundColor) ? clip.backgroundColor : "#000000",
+		backgroundPaddingX: toBackgroundPaddingX(clip.backgroundPaddingX),
+		backgroundPaddingY: toBackgroundPaddingY(clip.backgroundPaddingY),
+		backgroundRadius: toBackgroundRadius(clip.backgroundRadius),
+		backgroundEnabled: toBackgroundEnabled(clip.backgroundEnabled),
+		backgroundOpacity: toBackgroundOpacity(clip.backgroundOpacity),
+		backgroundBorderColor: isHexColor(clip.backgroundBorderColor) ? clip.backgroundBorderColor : "#ffffff",
+		backgroundBorderWidth: toBackgroundBorderWidth(clip.backgroundBorderWidth),
+		positionX: normalizedPositionX,
+		positionY: normalizedPositionY,
+		transitions: normalizeTransitionsByLength(
+			{
+				inPoint: normalizeTransitionPoint(rawTransitions.inPoint, "in", normalizedPositionX, normalizedPositionY),
+				outPoint: normalizeTransitionPoint(rawTransitions.outPoint, "out", normalizedPositionX, normalizedPositionY),
+			},
+			normalizedLength
+		),
+		accent: normalizeAccentByLength(rawAccent, normalizedLength),
+	};
 };
 
 const getTransitionProgress = (clip: ClipItem, currentTime: number): number => {
@@ -191,31 +720,51 @@ const resolveActiveTransitionEffect = (clip: ClipItem, currentTime: number): Tra
 	return "none";
 };
 
-const getLayerState = (clips: ClipItem[], currentTime: number): LayerState => {
-	const activeClips = clips
-		.filter((clip) => currentTime >= clip.start && currentTime <= clip.start + clip.length)
-		.sort((a, b) => b.zIndex - a.zIndex);
+const getClipTransitionState = (clip: ClipItem, localTime: number) => {
+	const inDuration = clip.transitions.inPoint.duration;
+	const outDuration = clip.transitions.outPoint.duration;
+	const inIntensity =
+		clip.transitions.inPoint.effect !== "none" && inDuration > 0 ? clamp((inDuration - localTime) / inDuration, 0, 1) : 0;
+	const outIntensity =
+		clip.transitions.outPoint.effect !== "none" && outDuration > 0
+			? clamp((localTime - (clip.length - outDuration)) / outDuration, 0, 1)
+			: 0;
 
-	if (activeClips.length === 0) {
+	if (inIntensity >= outIntensity) {
 		return {
-			baseLocalTime: 0,
-			overlayLocalTime: 0,
-			progress: 0,
-			effectType: "none",
-			hasOverlay: false,
+			effect: clip.transitions.inPoint.effect,
+			intensity: inIntensity,
+			source: "in" as const,
 		};
 	}
 
-	const overlayClip = activeClips[0];
-	const baseClip = activeClips[1] ?? activeClips[0];
 	return {
-		baseClip,
-		overlayClip,
-		baseLocalTime: clamp(currentTime - baseClip.start, 0, baseClip.length),
-		overlayLocalTime: clamp(currentTime - overlayClip.start, 0, overlayClip.length),
-		progress: getTransitionProgress(overlayClip, currentTime),
-		effectType: resolveActiveTransitionEffect(overlayClip, currentTime),
-		hasOverlay: activeClips.length > 1,
+		effect: clip.transitions.outPoint.effect,
+		intensity: outIntensity,
+		source: "out" as const,
+	};
+};
+
+const getLayerState = (clips: ClipItem[], currentTime: number): LayerState => {
+	const activeClips = clips
+		.filter((clip) => currentTime >= clip.start && currentTime <= clip.start + clip.length)
+		.sort((a, b) => {
+			if (a.track !== b.track) {
+				return b.track - a.track;
+			}
+
+			if (a.zIndex !== b.zIndex) {
+				return a.zIndex - b.zIndex;
+			}
+
+			return a.start - b.start;
+		});
+
+	return {
+		activeClips: activeClips.map((clip) => ({
+			clip,
+			localTime: clamp(currentTime - clip.start, 0, clip.length),
+		})),
 	};
 };
 
@@ -223,27 +772,288 @@ const drawTextClip = (
 	context: CanvasRenderingContext2D,
 	sourceCanvas: HTMLCanvasElement,
 	clip: ClipItem | undefined,
-	localTime: number
+	localTime: number,
+	shouldClear = true
 ): void => {
-	context.clearRect(0, 0, sourceCanvas.width, sourceCanvas.height);
+	if (shouldClear) {
+		context.clearRect(0, 0, sourceCanvas.width, sourceCanvas.height);
+	}
 	if (!clip) {
 		return;
 	}
 
-	const alpha = clip.length > 0 ? clamp(1 - Math.max(0, localTime - clip.length), 0, 1) : 1;
-	const x = clamp(clip.positionX, 0, 1) * sourceCanvas.width;
-	const y = clamp(clip.positionY, 0, 1) * sourceCanvas.height;
+	const transitionState = getClipTransitionState(clip, localTime);
+	let alpha = 1;
+	let drawX = clamp(clip.positionX, 0, 1) * sourceCanvas.width;
+	let drawY = clamp(clip.positionY, 0, 1) * sourceCanvas.height;
+	const hasBaseShadow = clip.shadowEnabled && clip.shadowOpacity > 0;
+	const hasGlow = clip.glowEnabled && clip.glowOpacity > 0 && clip.glowStrength > 0;
+	let textShadow = hasBaseShadow ? hexToRgba(clip.shadowColor, clip.shadowOpacity) : "rgba(0,0,0,0)";
+	let shadowBlur = hasBaseShadow ? clip.shadowBlur : 0;
+	let shadowOffsetX = hasBaseShadow ? clip.shadowOffsetX : 0;
+	let shadowOffsetY = hasBaseShadow ? clip.shadowOffsetY : 0;
+	if (hasGlow) {
+		const glowShadowBlur = clip.glowBlur * Math.max(0.1, clip.glowStrength);
+		if (!hasBaseShadow || glowShadowBlur >= shadowBlur) {
+			textShadow = hexToRgba(clip.glowColor, clip.glowOpacity);
+			shadowBlur = glowShadowBlur;
+			shadowOffsetX = 0;
+			shadowOffsetY = 0;
+		}
+	}
+	let glitchCharacterChaos = false;
+	let glitchChaosFrequency = 0;
+	let glitchChaosPower = 0;
+	let pixelateCellSize = 1;
+	let pixelatePower = 0;
+	let rgbShiftBaseAngle = 0;
+	let rgbShiftMagnitude = 0;
+	let rgbShiftColorA = "#ff005a";
+	let rgbShiftColorB = "#00e1ff";
 
-	context.globalAlpha = alpha;
-	context.textAlign = "center";
+	if (transitionState.intensity > 0 && transitionState.effect !== "none") {
+		const activePoint = transitionState.source === "in" ? clip.transitions.inPoint : clip.transitions.outPoint;
+		const easedIntensity = getEasedTransitionIntensity(
+			transitionState.intensity,
+			transitionState.source,
+			activePoint.easing
+		);
+			switch (transitionState.effect) {
+			case "fade": {
+				alpha = 1 - easedIntensity;
+				break;
+			}
+			case "slide": {
+				const slideProgress = transitionState.source === "in" ? 1 - easedIntensity : easedIntensity;
+				const anchorX = clamp(clip.positionX, 0, 1);
+				const anchorY = clamp(clip.positionY, 0, 1);
+				drawX =
+					(transitionState.source === "in"
+						? lerp(activePoint.slideX, anchorX, slideProgress)
+						: lerp(anchorX, activePoint.slideX, slideProgress)) * sourceCanvas.width;
+				drawY =
+					(transitionState.source === "in"
+						? lerp(activePoint.slideY, anchorY, slideProgress)
+						: lerp(anchorY, activePoint.slideY, slideProgress)) * sourceCanvas.height;
+				alpha = 1 - easedIntensity * 0.15;
+				break;
+			}
+			case "pixelate":
+				pixelatePower = easedIntensity;
+				pixelateCellSize = Math.max(
+					1,
+					activePoint.pixelateMaxSize * easedIntensity * (0.35 + (1 - activePoint.pixelateResolution) * 1.65)
+				);
+				context.filter = `blur(${(pixelateCellSize * 0.05).toFixed(2)}px) contrast(${(
+					1.05 + easedIntensity * 0.35
+				).toFixed(2)})`;
+				context.fillStyle = clip.color;
+				break;
+			case "rgbShift": {
+				rgbShiftBaseAngle = activePoint.rgbShiftAngle;
+				rgbShiftMagnitude = activePoint.rgbShiftOffset * easedIntensity;
+				rgbShiftColorA = activePoint.rgbShiftColorA;
+				rgbShiftColorB = activePoint.rgbShiftColorB;
+				const angle = (rgbShiftBaseAngle * Math.PI) / 180;
+				const offsetX = Math.cos(angle) * rgbShiftMagnitude;
+				const offsetY = Math.sin(angle) * rgbShiftMagnitude;
+				textShadow = getRgbShiftShadow(offsetX, offsetY, rgbShiftColorA, rgbShiftColorB, 0.78);
+				break;
+			}
+			default:
+				break;
+		}
+	}
+
+	const accentPower = getAccentGlitchIntensityAtTime(clip.accent, localTime);
+	if (accentPower > 0) {
+		const frequency = 24 * 2 * Math.PI;
+		const jitterX = Math.sin(localTime * frequency) * 18 * accentPower;
+		const jitterY = Math.cos(localTime * frequency * 0.73) * 12 * accentPower;
+		const aberration = 4 + accentPower * 20;
+		drawX += jitterX;
+		drawY += jitterY;
+		textShadow = `${(jitterX + aberration).toFixed(2)}px 0 rgba(255,0,90,0.85), ${(-jitterX - aberration).toFixed(2)}px 0 rgba(0,225,255,0.85), 0 2px 10px rgba(0,0,0,0.6)`;
+		shadowBlur = 16 + accentPower * 10;
+	}
+
+	context.globalAlpha = alpha * clip.opacity;
+	context.textAlign = "left";
 	context.textBaseline = "middle";
-	context.fillStyle = clip.color;
-	context.font = `700 ${Math.max(12, clip.fontSize)}px sans-serif`;
-	context.shadowColor = "rgba(0,0,0,0.45)";
-	context.shadowBlur = 14;
-	context.fillText(clip.text, x, y);
+	if (!pixelatePower) {
+		context.fillStyle = clip.color;
+	}
+	const escapedFontFamily = clip.fontFamily.includes(" ") ? `"${clip.fontFamily}"` : clip.fontFamily;
+	context.font = `${clip.fontWeight} ${Math.max(12, clip.fontSize)}px ${escapedFontFamily}, sans-serif`;
+	context.shadowColor = textShadow;
+	context.shadowBlur = shadowBlur;
+	context.shadowOffsetX = shadowOffsetX;
+	context.shadowOffsetY = shadowOffsetY;
+	context.lineJoin = "round";
+	context.miterLimit = 2;
+	context.strokeStyle = clip.strokeColor;
+	context.lineWidth = clip.strokeWidth * 2;
+	const letterSpacingPx =
+		clip.letterSpacingUnit === "em"
+			? clip.letterSpacing * Math.max(12, clip.fontSize)
+			: clip.letterSpacing;
+	const drawTextWithOutline = (text: string, x: number, y: number): void => {
+		if (clip.strokeWidth > 0) {
+			context.strokeText(text, x, y);
+		}
+		context.fillText(text, x, y);
+	};
+	const drawTextWithLetterSpacing = (text: string, startX: number, centerY: number): void => {
+		if (Math.abs(letterSpacingPx) < 0.001 || text.length <= 1) {
+			drawTextWithOutline(text, startX, centerY);
+			return;
+		}
+
+		const characters = Array.from(text);
+		const widths = characters.map((character) => context.measureText(character).width);
+		let cursorX = startX;
+
+		characters.forEach((character, index) => {
+			const charWidth = widths[index];
+			drawTextWithOutline(character, cursorX, centerY);
+			cursorX += charWidth + letterSpacingPx;
+		});
+	};
+	const transformedText = applyTextTransform(clip.text, clip.textTransform);
+	const lines = transformedText.split(/\r?\n/);
+	const getLineWidth = (line: string): number => {
+		if (line.length === 0) {
+			return 0;
+		}
+		if (Math.abs(letterSpacingPx) < 0.001 || line.length <= 1) {
+			return context.measureText(line).width;
+		}
+
+		const chars = Array.from(line);
+		const widthSum = chars.reduce((total, character) => total + context.measureText(character).width, 0);
+		return widthSum + letterSpacingPx * (chars.length - 1);
+	};
+	const lineWidths = lines.map(getLineWidth);
+	const blockWidth = Math.max(...lineWidths, 0);
+	const getLineGlyphHeight = (line: string): number => {
+		const sample = line.length > 0 ? line : "Mg";
+		const measured = context.measureText(sample);
+		const ascent =
+			measured.actualBoundingBoxAscent ?? measured.fontBoundingBoxAscent ?? Math.max(12, clip.fontSize) * 0.8;
+		const descent =
+			measured.actualBoundingBoxDescent ?? measured.fontBoundingBoxDescent ?? Math.max(12, clip.fontSize) * 0.2;
+		return Math.max(1, ascent + descent);
+	};
+	const lineGlyphHeights = lines.map(getLineGlyphHeight);
+	const getLineStartX = (lineWidth: number): number => {
+		const blockLeft = drawX - blockWidth / 2;
+		if (clip.textAlign === "left") {
+			return blockLeft;
+		}
+		if (clip.textAlign === "right") {
+			return blockLeft + (blockWidth - lineWidth);
+		}
+		return blockLeft + (blockWidth - lineWidth) / 2;
+	};
+	const lineHeight = Math.max(12, clip.fontSize) * clip.lineHeight;
+	const firstLineY = drawY - ((lines.length - 1) * lineHeight) / 2;
+	if (clip.backgroundEnabled && (clip.backgroundOpacity > 0 || clip.backgroundBorderWidth > 0)) {
+		const textBlockTop = lines.reduce((minimum, _line, lineIndex) => {
+			const lineCenterY = firstLineY + lineIndex * lineHeight;
+			const glyphHeight = lineGlyphHeights[lineIndex] ?? Math.max(12, clip.fontSize);
+			return Math.min(minimum, lineCenterY - glyphHeight / 2);
+		}, Number.POSITIVE_INFINITY);
+		const textBlockBottom = lines.reduce((maximum, _line, lineIndex) => {
+			const lineCenterY = firstLineY + lineIndex * lineHeight;
+			const glyphHeight = lineGlyphHeights[lineIndex] ?? Math.max(12, clip.fontSize);
+			return Math.max(maximum, lineCenterY + glyphHeight / 2);
+		}, Number.NEGATIVE_INFINITY);
+		const textBlockHeight = Math.max(1, textBlockBottom - textBlockTop);
+		const backgroundLeft = drawX - blockWidth / 2 - clip.backgroundPaddingX;
+		const backgroundTop = textBlockTop - clip.backgroundPaddingY;
+		const backgroundWidth = blockWidth + clip.backgroundPaddingX * 2;
+		const backgroundHeight = textBlockHeight + clip.backgroundPaddingY * 2;
+		context.save();
+		context.shadowColor = "rgba(0,0,0,0)";
+		context.shadowBlur = 0;
+		context.shadowOffsetX = 0;
+		context.shadowOffsetY = 0;
+		if (clip.backgroundOpacity > 0) {
+			context.globalAlpha = alpha * clip.backgroundOpacity;
+			context.fillStyle = clip.backgroundColor;
+			drawRoundedRect(
+				context,
+				backgroundLeft,
+				backgroundTop,
+				backgroundWidth,
+				backgroundHeight,
+				clip.backgroundRadius
+			);
+			context.fill();
+		}
+		if (clip.backgroundBorderWidth > 0) {
+			context.globalAlpha = alpha;
+			context.lineWidth = clip.backgroundBorderWidth;
+			context.strokeStyle = clip.backgroundBorderColor;
+			drawRoundedRect(
+				context,
+				backgroundLeft,
+				backgroundTop,
+				backgroundWidth,
+				backgroundHeight,
+				clip.backgroundRadius
+			);
+			context.stroke();
+		}
+		context.restore();
+		context.globalAlpha = alpha * clip.opacity;
+		context.shadowColor = textShadow;
+		context.shadowBlur = shadowBlur;
+		context.shadowOffsetX = shadowOffsetX;
+		context.shadowOffsetY = shadowOffsetY;
+		context.strokeStyle = clip.strokeColor;
+		context.lineWidth = clip.strokeWidth * 2;
+	}
+
+	if (glitchCharacterChaos && clip.text.replace(/\r?\n/g, "").length > 1) {
+		let characterOffset = 0;
+		lines.forEach((line, lineIndex) => {
+			const lineY = firstLineY + lineIndex * lineHeight;
+			const characters = Array.from(line);
+			if (characters.length === 0) {
+				return;
+			}
+
+			const widths = characters.map((character) => context.measureText(character).width);
+			const totalWidth = widths.reduce((total, width) => total + width, 0) + letterSpacingPx * (characters.length - 1);
+			let cursorX = getLineStartX(totalWidth);
+
+			characters.forEach((character, index) => {
+				const charWidth = widths[index];
+				const phase = localTime * glitchChaosFrequency + (characterOffset + index) * 1.7;
+				const charOffsetX = Math.sin(phase * 1.17) * glitchChaosPower * 4;
+				const charOffsetY = Math.cos(phase * 0.91) * glitchChaosPower * 4;
+				drawTextWithOutline(character, cursorX + charOffsetX, lineY + charOffsetY);
+				cursorX += charWidth + letterSpacingPx;
+			});
+
+			characterOffset += characters.length;
+		});
+	} else {
+		lines.forEach((line, lineIndex) => {
+			const lineWidth = lineWidths[lineIndex] ?? 0;
+			const lineStartXBase = getLineStartX(lineWidth);
+			const lineStartX = pixelatePower > 0 ? quantizeToStep(lineStartXBase, Math.max(1, pixelateCellSize)) : lineStartXBase;
+			const lineYBase = firstLineY + lineIndex * lineHeight;
+			const lineY = pixelatePower > 0 ? quantizeToStep(lineYBase, Math.max(1, pixelateCellSize)) : lineYBase;
+			drawTextWithLetterSpacing(line, lineStartX, lineY);
+		});
+	}
 	context.globalAlpha = 1;
 	context.shadowBlur = 0;
+	context.shadowOffsetX = 0;
+	context.shadowOffsetY = 0;
+	context.filter = "none";
 };
 
 const ShaderPlane = ({
@@ -299,12 +1109,6 @@ const ShaderPlane = ({
 				return mix(under, over, p);
 			}
 
-			vec4 applyDissolve(vec4 under, vec4 over, vec2 uv, float p) {
-				float n = random(floor(uv * 240.0) + vec2(u_time));
-				float mask = step(n, p);
-				return mix(under, over, mask);
-			}
-
 			vec4 applySlide(vec4 under, vec2 uv, float p) {
 				float x = uv.x + (1.0 - p);
 				vec2 overUv = vec2(fract(x), uv.y);
@@ -351,14 +1155,12 @@ const ShaderPlane = ({
 				if (u_effectType < 1.5) {
 					outColor = applyFade(under, over, u_progress);
 				} else if (u_effectType < 2.5) {
-					outColor = applyDissolve(under, over, uv, u_progress);
-				} else if (u_effectType < 3.5) {
 					outColor = applySlide(under, uv, u_progress);
-				} else if (u_effectType < 4.5) {
+				} else if (u_effectType < 3.5) {
 					outColor = applyGlitch(under, over, uv, u_progress);
-				} else if (u_effectType < 5.5) {
+				} else if (u_effectType < 4.5) {
 					outColor = applyPixelate(under, uv, u_progress);
-				} else if (u_effectType < 6.5) {
+				} else if (u_effectType < 5.5) {
 					outColor = applyRgbShift(under, uv, u_progress);
 				}
 
@@ -417,17 +1219,18 @@ const ShaderPlane = ({
 
 		contextA.fillStyle = "#0b1220";
 		contextA.fillRect(0, 0, sourceCanvasA.width, sourceCanvasA.height);
-		drawTextClip(contextA, sourceCanvasA, layerState.baseClip, layerState.baseLocalTime);
+		for (const activeClip of layerState.activeClips) {
+			drawTextClip(contextA, sourceCanvasA, activeClip.clip, activeClip.localTime, false);
+		}
 
 		contextB.clearRect(0, 0, sourceCanvasB.width, sourceCanvasB.height);
-		drawTextClip(contextB, sourceCanvasB, layerState.overlayClip, layerState.overlayLocalTime);
 
 		textureA.needsUpdate = true;
 		textureB.needsUpdate = true;
 		uniforms.u_time.value = state.clock.elapsedTime;
-		uniforms.u_progress.value = layerState.progress;
-		uniforms.u_effectType.value = effectCodeMap[layerState.effectType];
-		uniforms.u_hasOverlay.value = layerState.hasOverlay ? 1 : 0;
+		uniforms.u_progress.value = 0;
+		uniforms.u_effectType.value = effectCodeMap.none;
+		uniforms.u_hasOverlay.value = 0;
 		uniforms.u_resolution.value.set(sourceCanvasA.width, sourceCanvasA.height);
 	});
 
@@ -455,20 +1258,6 @@ const ShaderCanvasLayer = ({
 				<ShaderPlane layerState={layerState} />
 			</Canvas>
 		</div>
-	);
-};
-
-const TimelineComposition = ({ clips }: { clips: ClipItem[] }) => {
-	const frame = useCurrentFrame();
-	const currentTime = frame / FPS;
-	const layerState = getLayerState(clips, currentTime);
-
-	return (
-		<AbsoluteFill style={{ background: "#0f172a", overflow: "hidden" }}>
-			<Sequence from={0} durationInFrames={Math.max(1, Math.ceil((clips.length + 2) * FPS * 4))}>
-				<ShaderCanvasLayer layerState={layerState} />
-			</Sequence>
-		</AbsoluteFill>
 	);
 };
 
@@ -510,12 +1299,12 @@ const AssetCard = ({
 const TimelineClip = ({
 	clip,
 	selected,
-	onSelect,
+	onOpenSettings,
 	onTrimStart,
 }: {
 	clip: ClipItem;
 	selected: boolean;
-	onSelect: (id: string) => void;
+	onOpenSettings: (id: string) => void;
 	onTrimStart: (clip: ClipItem, edge: TrimEdge, clientX: number) => void;
 }) => {
 	const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -537,7 +1326,7 @@ const TimelineClip = ({
 		<div ref={setNodeRef} style={style} className="absolute top-1 h-10 rounded">
 			<div
 				className={`relative h-full w-full rounded ${selected ? "ring-2 ring-white" : ""}`}
-				onClick={() => onSelect(clip.id)}
+				onClick={() => onOpenSettings(clip.id)}
 			>
 				{hasInTransition ? (
 					<div className="absolute -top-2 left-0 z-20 rounded bg-amber-500/90 px-1 text-[10px] font-bold text-white">
@@ -568,7 +1357,7 @@ const TimelineClip = ({
 				<button
 					type="button"
 					className="absolute inset-x-2 inset-y-0 flex items-center justify-between gap-2 overflow-hidden text-left text-[11px] font-semibold text-black"
-					onClick={() => onSelect(clip.id)}
+					onClick={() => onOpenSettings(clip.id)}
 					{...listeners}
 					{...attributes}
 				>
@@ -602,6 +1391,7 @@ const TimelineTrack = ({
 };
 
 export default function EditorPage() {
+	const router = useRouter();
 	const timelineCanvasRef = useRef<HTMLDivElement | null>(null);
 	const trimRef = useRef<TrimState | null>(null);
 	const rafRef = useRef<number | null>(null);
@@ -609,7 +1399,7 @@ export default function EditorPage() {
 	const [mounted, setMounted] = useState(false);
 
 	const [clips, setClips] = useState<ClipItem[]>(initialClips);
-	const [selectedClipId, setSelectedClipId] = useState<string>(initialClips[0].id);
+	const [selectedClipId, setSelectedClipId] = useState<string>("");
 	const [selectedAssetId, setSelectedAssetId] = useState<string>(textAssets[0].id);
 	const [currentTime, setCurrentTime] = useState<number>(0);
 	const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -619,23 +1409,56 @@ export default function EditorPage() {
 
 	const sensors = useSensors(useSensor(PointerSensor));
 
+	const syncEditorStateFromStorage = useCallback(() => {
+		setClips(readEditorClips<ClipItem>(initialClips).map(normalizeClip));
+		setSelectedClipId(readEditorSelectedClipId());
+	}, []);
+
 	useEffect(() => {
 		setMounted(true);
-	}, []);
+		syncEditorStateFromStorage();
+	}, [syncEditorStateFromStorage]);
+
+	useEffect(() => {
+		if (!mounted) {
+			return;
+		}
+
+		const handleFocus = () => {
+			syncEditorStateFromStorage();
+		};
+
+		const handleVisibilityChange = () => {
+			if (document.visibilityState === "visible") {
+				syncEditorStateFromStorage();
+			}
+		};
+
+		window.addEventListener("focus", handleFocus);
+		document.addEventListener("visibilitychange", handleVisibilityChange);
+		return () => {
+			window.removeEventListener("focus", handleFocus);
+			document.removeEventListener("visibilitychange", handleVisibilityChange);
+		};
+	}, [mounted, syncEditorStateFromStorage]);
+
+	useEffect(() => {
+		if (!mounted) {
+			return;
+		}
+		writeEditorClips(clips.map(normalizeClip));
+	}, [clips, mounted]);
+
+	useEffect(() => {
+		if (!mounted) {
+			return;
+		}
+		writeEditorSelectedClipId(selectedClipId);
+	}, [mounted, selectedClipId]);
 
 	const duration = useMemo(() => {
 		return Math.max(8, ...clips.map((clip) => clip.start + clip.length + 0.5));
 	}, [clips]);
-
-	const durationInFrames = useMemo(() => Math.ceil(duration * FPS), [duration]);
-	const safeInitialFrame = useMemo(
-		() => clamp(Math.floor(currentTime * FPS), 0, Math.max(0, durationInFrames - 1)),
-		[currentTime, durationInFrames]
-	);
-
-	const selectedClip = useMemo(() => {
-		return clips.find((clip) => clip.id === selectedClipId) ?? clips[0];
-	}, [clips, selectedClipId]);
 
 	const runtimeLayerState = useMemo(() => getLayerState(clips, currentTime), [clips, currentTime]);
 
@@ -778,57 +1601,12 @@ export default function EditorPage() {
 		};
 	}, [duration]);
 
-	const updateSelectedClip = useCallback(
-		<K extends keyof ClipItem>(key: K, value: ClipItem[K]) => {
-			if (!selectedClipId) {
-				return;
-			}
-			setClips((prev) =>
-				prev.map((clip) => (clip.id === selectedClipId ? { ...clip, [key]: value } : clip))
-			);
+	const openClipSettings = useCallback(
+		(clipId: string) => {
+			setSelectedClipId(clipId);
+			router.push(`/editor/clip/${clipId}`);
 		},
-		[selectedClipId]
-	);
-
-	const updateSelectedClipTransitions = useCallback(
-		(point: keyof ClipTransitions, field: keyof ClipTransitionPoint, value: number | TransitionType) => {
-			if (!selectedClipId) {
-				return;
-			}
-
-			setClips((prev) =>
-				prev.map((clip) => {
-					if (clip.id !== selectedClipId) {
-						return clip;
-					}
-
-					if (field === "duration") {
-						return {
-							...clip,
-							transitions: {
-								...clip.transitions,
-								[point]: {
-									...clip.transitions[point],
-									duration: clamp(Number(value), 0, clip.length),
-								},
-							},
-						};
-					}
-
-					return {
-						...clip,
-						transitions: {
-							...clip.transitions,
-							[point]: {
-								...clip.transitions[point],
-								effect: value as TransitionType,
-							},
-						},
-					};
-				})
-			);
-		},
-		[selectedClipId]
+		[router]
 	);
 
 	const seekTo = (nextTime: number) => {
@@ -889,11 +1667,78 @@ export default function EditorPage() {
 				zIndex: maxZ + 1,
 				color: asset.color,
 				fontSize: asset.fontSize,
+				fontFamily: defaultFontFamily,
+				fontWeight: defaultFontWeight,
+				textTransform: "none",
+				textAlign: "center",
+				strokeColor: "#000000",
+				strokeWidth: 0,
+				letterSpacing: 0,
+				letterSpacingUnit: "em",
+				lineHeight: 1.2,
+				opacity: 1,
+				shadowColor: "#000000",
+				shadowBlur: 14,
+				shadowOffsetX: 0,
+				shadowOffsetY: 2,
+				shadowOpacity: 0.45,
+				shadowEnabled: true,
+				glowColor: "#60a5fa",
+				glowStrength: 1,
+				glowEnabled: false,
+				glowBlur: 24,
+				glowOpacity: 0.7,
+				backgroundColor: "#000000",
+				backgroundPaddingX: 16,
+				backgroundPaddingY: 8,
+				backgroundRadius: 12,
+				backgroundEnabled: false,
+				backgroundOpacity: 0.55,
+				backgroundBorderColor: "#ffffff",
+				backgroundBorderWidth: 0,
 				positionX: 0.5,
 				positionY: 0.5,
 				transitions: {
-					inPoint: { duration: 0, effect: "none" },
-					outPoint: { duration: 0, effect: "none" },
+					inPoint: {
+						duration: 0,
+						effect: "none",
+						easing: "linear",
+						slideX: 0,
+						slideY: 0.5,
+						glitchIntensity: 0.65,
+						glitchSpeed: 24,
+						glitchChromaticAberration: 6,
+						glitchCharacterChaos: false,
+						pixelateMaxSize: 48,
+						pixelateResolution: 0.45,
+						rgbShiftAngle: 0,
+						rgbShiftOffset: 24,
+						rgbShiftColorA: "#ff005a",
+						rgbShiftColorB: "#00e1ff",
+					},
+					outPoint: {
+						duration: 0,
+						effect: "none",
+						easing: "linear",
+						slideX: 0,
+						slideY: 0.5,
+						glitchIntensity: 0.65,
+						glitchSpeed: 24,
+						glitchChromaticAberration: 6,
+						glitchCharacterChaos: false,
+						pixelateMaxSize: 48,
+						pixelateResolution: 0.45,
+						rgbShiftAngle: 0,
+						rgbShiftOffset: 24,
+						rgbShiftColorA: "#ff005a",
+						rgbShiftColorB: "#00e1ff",
+					},
+				},
+				accent: {
+					effect: "none",
+					triggerTime: 0,
+					duration: 0.2,
+					intensity: 0.8,
 				},
 			};
 
@@ -1050,169 +1895,11 @@ export default function EditorPage() {
 							))}
 						</div>
 
-						<h2 className="pt-2 text-sm font-semibold text-white/80">Remotion Preview</h2>
-						<div className="aspect-video overflow-hidden rounded border border-white/10 bg-black">
-							<Player
-								component={TimelineComposition}
-								inputProps={{ clips }}
-								durationInFrames={durationInFrames}
-								fps={FPS}
-								acknowledgeRemotionLicense
-								compositionWidth={640}
-								compositionHeight={360}
-								controls
-								initialFrame={safeInitialFrame}
-								style={{ width: "100%", height: "100%" }}
-							/>
-						</div>
-
 						<div className="rounded border border-white/10 bg-black/30 p-3">
-							<h3 className="text-xs font-semibold text-white/80">Text Settings</h3>
-							{selectedClip ? (
-								<div className="mt-2 space-y-2 text-xs">
-									<label className="space-y-1">
-										<span className="text-white/60">テキスト</span>
-										<input
-											type="text"
-											className="w-full rounded border border-white/20 bg-zinc-700 px-2 py-1 text-white"
-											value={selectedClip.text}
-											onChange={(event) => updateSelectedClip("text", event.target.value)}
-										/>
-									</label>
-									<div className="grid grid-cols-2 gap-2">
-										<label className="space-y-1">
-											<span className="text-white/60">文字サイズ</span>
-											<input
-												type="number"
-												min={12}
-												max={200}
-												className="w-full rounded border border-white/20 bg-zinc-700 px-2 py-1 text-white"
-												value={selectedClip.fontSize}
-												onChange={(event) => updateSelectedClip("fontSize", Number(event.target.value))}
-											/>
-										</label>
-										<label className="space-y-1">
-											<span className="text-white/60">文字色</span>
-											<input
-												type="color"
-												className="h-8 w-full rounded border border-white/20 bg-zinc-700 px-1 py-1"
-												value={selectedClip.color}
-												onChange={(event) => updateSelectedClip("color", event.target.value)}
-											/>
-										</label>
-										<label className="space-y-1">
-											<span className="text-white/60">X位置 (0-1)</span>
-											<input
-												type="number"
-												step={0.01}
-												min={0}
-												max={1}
-												className="w-full rounded border border-white/20 bg-zinc-700 px-2 py-1 text-white"
-												value={selectedClip.positionX}
-												onChange={(event) =>
-													updateSelectedClip("positionX", clamp(Number(event.target.value), 0, 1))
-												}
-											/>
-										</label>
-										<label className="space-y-1">
-											<span className="text-white/60">Y位置 (0-1)</span>
-											<input
-												type="number"
-												step={0.01}
-												min={0}
-												max={1}
-												className="w-full rounded border border-white/20 bg-zinc-700 px-2 py-1 text-white"
-												value={selectedClip.positionY}
-												onChange={(event) =>
-													updateSelectedClip("positionY", clamp(Number(event.target.value), 0, 1))
-												}
-											/>
-										</label>
-									</div>
-								</div>
-							) : (
-								<p className="mt-2 text-xs text-white/60">クリップを選択してください。</p>
-							)}
-						</div>
-
-						<div className="rounded border border-white/10 bg-black/30 p-3">
-							<h3 className="text-xs font-semibold text-white/80">Effect Settings</h3>
-							{selectedClip ? (
-								<div className="mt-2 space-y-2 text-xs">
-									<div className="grid grid-cols-2 gap-2">
-										<label className="space-y-1">
-											<span className="text-white/60">イン点 効果</span>
-											<select
-												className="w-full rounded border border-white/20 bg-zinc-700 px-2 py-1 text-white"
-												value={selectedClip.transitions.inPoint.effect}
-												onChange={(event) =>
-													updateSelectedClipTransitions(
-														"inPoint",
-														"effect",
-														event.target.value as TransitionType
-													)
-												}
-											>
-												{transitionTypes.map((type) => (
-													<option key={`in-${type}`} value={type} className="bg-zinc-700 text-white">
-														{type}
-													</option>
-												))}
-											</select>
-										</label>
-										<label className="space-y-1">
-											<span className="text-white/60">イン点 秒数</span>
-											<input
-												type="number"
-												step={0.25}
-												min={0}
-												max={selectedClip.length}
-												className="w-full rounded border border-white/20 bg-zinc-700 px-2 py-1 text-white"
-												value={selectedClip.transitions.inPoint.duration}
-												onChange={(event) =>
-													updateSelectedClipTransitions("inPoint", "duration", Number(event.target.value))
-												}
-											/>
-										</label>
-										<label className="space-y-1">
-											<span className="text-white/60">アウト点 効果</span>
-											<select
-												className="w-full rounded border border-white/20 bg-zinc-700 px-2 py-1 text-white"
-												value={selectedClip.transitions.outPoint.effect}
-												onChange={(event) =>
-													updateSelectedClipTransitions(
-														"outPoint",
-														"effect",
-														event.target.value as TransitionType
-													)
-												}
-											>
-												{transitionTypes.map((type) => (
-													<option key={`out-${type}`} value={type} className="bg-zinc-700 text-white">
-														{type}
-													</option>
-												))}
-											</select>
-										</label>
-										<label className="space-y-1">
-											<span className="text-white/60">アウト点 秒数</span>
-											<input
-												type="number"
-												step={0.25}
-												min={0}
-												max={selectedClip.length}
-												className="w-full rounded border border-white/20 bg-zinc-700 px-2 py-1 text-white"
-												value={selectedClip.transitions.outPoint.duration}
-												onChange={(event) =>
-													updateSelectedClipTransitions("outPoint", "duration", Number(event.target.value))
-												}
-											/>
-										</label>
-									</div>
-								</div>
-							) : (
-								<p className="mt-2 text-xs text-white/60">クリップを選択してください。</p>
-							)}
+							<h3 className="text-xs font-semibold text-white/80">Clip Settings</h3>
+							<p className="mt-2 text-xs text-white/60">
+								タイムライン上のクリップをタップすると、専用の設定ページに遷移します。
+							</p>
 						</div>
 					</div>
 				</section>
@@ -1250,7 +1937,7 @@ export default function EditorPage() {
 												key={clip.id}
 												clip={clip}
 												selected={clip.id === selectedClipId}
-												onSelect={setSelectedClipId}
+												onOpenSettings={openClipSettings}
 												onTrimStart={handleTrimStart}
 											/>
 										))}
@@ -1273,6 +1960,34 @@ export default function EditorPage() {
 										track,
 										zIndex,
 										fontSize,
+										fontFamily,
+										fontWeight,
+										textTransform,
+										strokeColor,
+										strokeWidth,
+										letterSpacing,
+										letterSpacingUnit,
+										lineHeight,
+										opacity,
+										shadowColor,
+										shadowBlur,
+										shadowOffsetX,
+										shadowOffsetY,
+										shadowOpacity,
+										shadowEnabled,
+										glowColor,
+										glowStrength,
+										glowEnabled,
+										glowBlur,
+										glowOpacity,
+										backgroundColor,
+										backgroundPaddingX,
+										backgroundPaddingY,
+										backgroundRadius,
+										backgroundEnabled,
+										backgroundOpacity,
+										backgroundBorderColor,
+										backgroundBorderWidth,
 										positionX,
 										positionY,
 										color,
@@ -1286,6 +2001,34 @@ export default function EditorPage() {
 										track,
 										zIndex,
 										fontSize,
+										fontFamily,
+										fontWeight,
+										textTransform,
+										strokeColor,
+										strokeWidth,
+										letterSpacing,
+										letterSpacingUnit,
+										lineHeight,
+										opacity,
+										shadowColor,
+										shadowBlur,
+										shadowOffsetX,
+										shadowOffsetY,
+										shadowOpacity,
+										shadowEnabled,
+										glowColor,
+										glowStrength,
+										glowEnabled,
+										glowBlur,
+										glowOpacity,
+										backgroundColor,
+										backgroundPaddingX,
+										backgroundPaddingY,
+										backgroundRadius,
+										backgroundEnabled,
+										backgroundOpacity,
+										backgroundBorderColor,
+										backgroundBorderWidth,
 										positionX,
 										positionY,
 										color,

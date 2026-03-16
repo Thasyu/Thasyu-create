@@ -9,7 +9,56 @@ export const dynamic = "force-static";
 
 const isGitHubPagesBuild = process.env.GITHUB_PAGES === "true";
 
-type TransitionType = "none" | "fade" | "dissolve" | "slide" | "glitch" | "pixelate" | "rgbShift";
+type TransitionType = "none" | "fade" | "slide" | "glitch" | "pixelate" | "rgbShift";
+type TransitionEasing = "linear" | "easeIn" | "easeOut" | "easeInOut";
+type FontWeightValue = 300 | 400 | 500 | 700 | 900;
+type LetterSpacingUnit = "px" | "em";
+type TextAlignMode = "left" | "center" | "right";
+type TextTransformMode = "none" | "uppercase" | "lowercase";
+
+const availableFonts = [
+	"Inter",
+	"Roboto",
+	"Poppins",
+	"Montserrat",
+	"Bebas Neue",
+	"Anton",
+	"Oswald",
+	"Noto Sans JP",
+	"M PLUS 1p",
+	"Zen Maru Gothic",
+	"Kosugi",
+	"Noto Serif JP",
+	"Playfair Display",
+	"Pacifico",
+	"Dancing Script",
+] as const;
+const availableFontSet = new Set<string>(availableFonts);
+const defaultFontFamily = "Inter";
+const defaultFontWeight: FontWeightValue = 700;
+const fontWeightsByFamily: Record<string, readonly FontWeightValue[]> = {
+	Inter: [300, 400, 500, 700, 900],
+	Roboto: [300, 400, 500, 700, 900],
+	Poppins: [300, 400, 500, 700, 900],
+	Montserrat: [300, 400, 500, 700, 900],
+	"Bebas Neue": [400],
+	Anton: [400],
+	Oswald: [300, 400, 500, 700],
+	"Noto Sans JP": [300, 400, 500, 700, 900],
+	"M PLUS 1p": [300, 400, 500, 700, 900],
+	"Zen Maru Gothic": [300, 400, 500, 700, 900],
+	Kosugi: [400],
+	"Noto Serif JP": [300, 400, 500, 700, 900],
+	"Playfair Display": [400, 500, 700, 900],
+	Pacifico: [400],
+	"Dancing Script": [400, 500, 700],
+};
+
+const transitionEasingTypes: TransitionEasing[] = ["linear", "easeIn", "easeOut", "easeInOut"];
+
+const isTransitionEasing = (value: unknown): value is TransitionEasing => {
+	return transitionEasingTypes.includes(value as TransitionEasing);
+};
 
 type RenderTextClipInput = {
 	id: string;
@@ -19,12 +68,41 @@ type RenderTextClipInput = {
 	zIndex?: number;
 	track?: number;
 	fontSize?: number;
+	fontFamily?: string;
+	fontWeight?: number;
+	textTransform?: TextTransformMode;
+	textAlign?: TextAlignMode;
+	strokeColor?: string;
+	strokeWidth?: number;
+	letterSpacing?: number;
+	letterSpacingUnit?: LetterSpacingUnit;
+	lineHeight?: number;
+	opacity?: number;
+	shadowColor?: string;
+	shadowBlur?: number;
+	shadowOffsetX?: number;
+	shadowOffsetY?: number;
+	shadowOpacity?: number;
+	shadowEnabled?: boolean;
+	glowColor?: string;
+	glowStrength?: number;
+	glowEnabled?: boolean;
+	glowBlur?: number;
+	glowOpacity?: number;
+	backgroundColor?: string;
+	backgroundPaddingX?: number;
+	backgroundPaddingY?: number;
+	backgroundRadius?: number;
+	backgroundEnabled?: boolean;
+	backgroundOpacity?: number;
+	backgroundBorderColor?: string;
+	backgroundBorderWidth?: number;
 	color?: string;
 	positionX?: number;
 	positionY?: number;
 	transitions?: {
-		inPoint?: { duration?: number; effect?: TransitionType };
-		outPoint?: { duration?: number; effect?: TransitionType };
+		inPoint?: { duration?: number; effect?: TransitionType; easing?: TransitionEasing };
+		outPoint?: { duration?: number; effect?: TransitionType; easing?: TransitionEasing };
 	};
 };
 
@@ -45,11 +123,43 @@ type NormalizedClip = {
 	length: number;
 	zIndex: number;
 	fontSize: number;
+	fontFamily: string;
+	fontWeight: FontWeightValue;
+	textTransform: TextTransformMode;
+	textAlign: TextAlignMode;
+	strokeColor: string;
+	strokeWidth: number;
+	letterSpacing: number;
+	letterSpacingUnit: LetterSpacingUnit;
+	letterSpacingPx: number;
+	lineHeight: number;
+	opacity: number;
+	shadowColor: string;
+	shadowBlur: number;
+	shadowOffsetX: number;
+	shadowOffsetY: number;
+	shadowOpacity: number;
+	shadowEnabled: boolean;
+	glowColor: string;
+	glowStrength: number;
+	glowEnabled: boolean;
+	glowBlur: number;
+	glowOpacity: number;
+	backgroundColor: string;
+	backgroundPaddingX: number;
+	backgroundPaddingY: number;
+	backgroundRadius: number;
+	backgroundEnabled: boolean;
+	backgroundOpacity: number;
+	backgroundBorderColor: string;
+	backgroundBorderWidth: number;
 	color: string;
 	x: number;
 	y: number;
 	inDuration: number;
 	outDuration: number;
+	inEasing: TransitionEasing;
+	outEasing: TransitionEasing;
 };
 
 const toNumber = (value: unknown, fallback: number): number => {
@@ -67,6 +177,234 @@ const escapeDrawText = (value: string): string => {
 		.replace(/,/g, "\\,")
 		.replace(/;/g, "\\;")
 		.replace(/\n/g, "\\n");
+};
+
+const toFontFamily = (value: unknown): string => {
+	if (typeof value !== "string") {
+		return defaultFontFamily;
+	}
+	return availableFontSet.has(value) ? value : defaultFontFamily;
+};
+
+const isHexColor = (value: unknown): value is string => {
+	return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value);
+};
+
+const isTextAlignMode = (value: unknown): value is TextAlignMode => {
+	return value === "left" || value === "center" || value === "right";
+};
+
+const isTextTransformMode = (value: unknown): value is TextTransformMode => {
+	return value === "none" || value === "uppercase" || value === "lowercase";
+};
+
+const getSupportedFontWeights = (fontFamily: string): readonly FontWeightValue[] => {
+	return fontWeightsByFamily[fontFamily] ?? [300, 400, 500, 700, 900];
+};
+
+const toFontWeight = (value: unknown, fontFamily: string): FontWeightValue => {
+	const supportedWeights = getSupportedFontWeights(fontFamily);
+	const numeric = Number(value);
+	if (supportedWeights.includes(numeric as FontWeightValue)) {
+		return numeric as FontWeightValue;
+	}
+	if (supportedWeights.includes(defaultFontWeight)) {
+		return defaultFontWeight;
+	}
+	return supportedWeights[0] ?? 400;
+};
+
+const toTextAlignMode = (value: unknown): TextAlignMode => {
+	return isTextAlignMode(value) ? value : "center";
+};
+
+const toTextTransformMode = (value: unknown): TextTransformMode => {
+	return isTextTransformMode(value) ? value : "none";
+};
+
+const applyTextTransform = (text: string, mode: TextTransformMode): string => {
+	switch (mode) {
+		case "uppercase":
+			return text.toUpperCase();
+		case "lowercase":
+			return text.toLowerCase();
+		case "none":
+		default:
+			return text;
+	}
+};
+
+const toFontStyleName = (weight: FontWeightValue): "Light" | "Regular" | "Medium" | "Bold" | "Black" => {
+	switch (weight) {
+		case 300:
+			return "Light";
+		case 400:
+			return "Regular";
+		case 500:
+			return "Medium";
+		case 900:
+			return "Black";
+		case 700:
+		default:
+			return "Bold";
+	}
+};
+
+const isLetterSpacingUnit = (value: unknown): value is LetterSpacingUnit => {
+	return value === "px" || value === "em";
+};
+
+const toLetterSpacingUnit = (value: unknown): LetterSpacingUnit => {
+	return isLetterSpacingUnit(value) ? value : "em";
+};
+
+const toLetterSpacing = (value: unknown, unit: LetterSpacingUnit): number => {
+	const numeric = toNumber(value, 0);
+	if (unit === "em") {
+		return Math.min(Math.max(numeric, -0.1), 1);
+	}
+	return Math.min(Math.max(numeric, -10), 160);
+};
+
+const toLetterSpacingPx = (value: number, unit: LetterSpacingUnit, fontSize: number): number => {
+	return unit === "em" ? value * fontSize : value;
+};
+
+const toLineHeight = (value: unknown): number => {
+	return Math.min(Math.max(toNumber(value, 1.2), 0), 2);
+};
+
+const toStrokeWidth = (value: unknown): number => {
+	return Math.min(Math.max(toNumber(value, 0), 0), 5);
+};
+
+const toOpacity = (value: unknown): number => {
+	return Math.min(Math.max(toNumber(value, 1), 0), 1);
+};
+
+const toShadowBlur = (value: unknown): number => {
+	return Math.min(Math.max(toNumber(value, 14), 0), 100);
+};
+
+const toShadowOffset = (value: unknown): number => {
+	return Math.min(Math.max(toNumber(value, 0), -200), 200);
+};
+
+const toShadowOpacity = (value: unknown): number => {
+	return Math.min(Math.max(toNumber(value, 0.45), 0), 1);
+};
+
+const toShadowEnabled = (value: unknown): boolean => {
+	if (typeof value === "boolean") {
+		return value;
+	}
+	return true;
+};
+
+const toGlowStrength = (value: unknown): number => {
+	return Math.min(Math.max(toNumber(value, 1), 0), 5);
+};
+
+const toGlowBlur = (value: unknown): number => {
+	return Math.min(Math.max(toNumber(value, 24), 0), 120);
+};
+
+const toGlowOpacity = (value: unknown): number => {
+	return Math.min(Math.max(toNumber(value, 0.7), 0), 1);
+};
+
+const toGlowEnabled = (value: unknown): boolean => {
+	if (typeof value === "boolean") {
+		return value;
+	}
+	return false;
+};
+
+const toBackgroundPaddingX = (value: unknown): number => {
+	return Math.min(Math.max(toNumber(value, 16), 0), 200);
+};
+
+const toBackgroundPaddingY = (value: unknown): number => {
+	return Math.min(Math.max(toNumber(value, 8), 0), 200);
+};
+
+const toBackgroundRadius = (value: unknown): number => {
+	return Math.min(Math.max(toNumber(value, 12), 0), 200);
+};
+
+const toBackgroundEnabled = (value: unknown): boolean => {
+	if (typeof value === "boolean") {
+		return value;
+	}
+	return false;
+};
+
+const toBackgroundOpacity = (value: unknown): number => {
+	return Math.min(Math.max(toNumber(value, 0.55), 0), 1);
+};
+
+const toBackgroundBorderWidth = (value: unknown): number => {
+	return Math.min(Math.max(toNumber(value, 0), 0), 20);
+};
+
+const applyLetterSpacingApproximation = (text: string, letterSpacingPx: number): string => {
+	if (letterSpacingPx <= 0.2) {
+		return text;
+	}
+
+	const spacer = letterSpacingPx <= 1.5 ? "\u200A" : letterSpacingPx <= 3 ? "\u2009" : "\u2005";
+	const spacerRepeat = Math.max(1, Math.round(letterSpacingPx / 2));
+	const spacerToken = spacer.repeat(spacerRepeat);
+
+	return text
+		.split(/\r?\n/)
+		.map((line) => {
+			const chars = Array.from(line);
+			if (chars.length <= 1) {
+				return line;
+			}
+			return chars.join(spacerToken);
+		})
+		.join("\n");
+};
+
+const applyTextAlignApproximation = (text: string, textAlign: TextAlignMode): string => {
+	if (textAlign === "left") {
+		return text;
+	}
+
+	const lines = text.split(/\r?\n/);
+	const maxLength = lines.reduce((max, line) => Math.max(max, Array.from(line).length), 0);
+
+	return lines
+		.map((line) => {
+			const length = Array.from(line).length;
+			const padding = Math.max(0, maxLength - length);
+			if (textAlign === "right") {
+				return `${" ".repeat(padding)}${line}`;
+			}
+			const leftPadding = Math.floor(padding / 2);
+			return `${" ".repeat(leftPadding)}${line}`;
+		})
+		.join("\n");
+};
+
+const toEasing = (value: unknown): TransitionEasing => {
+	return isTransitionEasing(value) ? value : "linear";
+};
+
+const getEasedProgressExpression = (progressExpression: string, easing: TransitionEasing): string => {
+	switch (easing) {
+		case "easeIn":
+			return `pow(${progressExpression},2)`;
+		case "easeOut":
+			return `1-pow(1-${progressExpression},2)`;
+		case "easeInOut":
+			return `if(lt(${progressExpression},0.5),2*pow(${progressExpression},2),1-2*pow(1-${progressExpression},2))`;
+		case "linear":
+		default:
+			return progressExpression;
+	}
 };
 
 const parseBody = (body: unknown): { ok: true; value: RenderRequestBody } | { ok: false; error: string } => {
@@ -100,10 +438,42 @@ const normalizeClips = (clips: RenderTextClipInput[]): NormalizedClip[] => {
 			const end = start + length;
 			const zIndex = toNumber(clip.zIndex, index + 1);
 			const fontSize = Math.max(12, Math.floor(toNumber(clip.fontSize, 64)));
+			const fontFamily = toFontFamily(clip.fontFamily);
+			const fontWeight = toFontWeight(clip.fontWeight, fontFamily);
+			const textTransform = toTextTransformMode(clip.textTransform);
+			const textAlign = toTextAlignMode(clip.textAlign);
+			const strokeColor = isHexColor(clip.strokeColor) ? clip.strokeColor : "#000000";
+			const strokeWidth = toStrokeWidth(clip.strokeWidth);
+			const letterSpacingUnit = toLetterSpacingUnit(clip.letterSpacingUnit);
+			const letterSpacing = toLetterSpacing(clip.letterSpacing, letterSpacingUnit);
+			const letterSpacingPx = toLetterSpacingPx(letterSpacing, letterSpacingUnit, fontSize);
+			const lineHeight = toLineHeight(clip.lineHeight);
+			const opacity = toOpacity(clip.opacity);
+			const shadowColor = isHexColor(clip.shadowColor) ? clip.shadowColor : "#000000";
+			const shadowBlur = toShadowBlur(clip.shadowBlur);
+			const shadowOffsetX = toShadowOffset(clip.shadowOffsetX);
+			const shadowOffsetY = toShadowOffset(clip.shadowOffsetY);
+			const shadowOpacity = toShadowOpacity(clip.shadowOpacity);
+			const shadowEnabled = toShadowEnabled(clip.shadowEnabled);
+			const glowColor = isHexColor(clip.glowColor) ? clip.glowColor : "#60a5fa";
+			const glowStrength = toGlowStrength(clip.glowStrength);
+			const glowEnabled = toGlowEnabled(clip.glowEnabled);
+			const glowBlur = toGlowBlur(clip.glowBlur);
+			const glowOpacity = toGlowOpacity(clip.glowOpacity);
+			const backgroundColor = isHexColor(clip.backgroundColor) ? clip.backgroundColor : "#000000";
+			const backgroundPaddingX = toBackgroundPaddingX(clip.backgroundPaddingX);
+			const backgroundPaddingY = toBackgroundPaddingY(clip.backgroundPaddingY);
+			const backgroundRadius = toBackgroundRadius(clip.backgroundRadius);
+			const backgroundEnabled = toBackgroundEnabled(clip.backgroundEnabled);
+			const backgroundOpacity = toBackgroundOpacity(clip.backgroundOpacity);
+			const backgroundBorderColor = isHexColor(clip.backgroundBorderColor) ? clip.backgroundBorderColor : "#ffffff";
+			const backgroundBorderWidth = toBackgroundBorderWidth(clip.backgroundBorderWidth);
 			const x = Math.min(Math.max(toNumber(clip.positionX, 0.5), 0), 1);
 			const y = Math.min(Math.max(toNumber(clip.positionY, 0.5), 0), 1);
 			const inDuration = Math.min(length, Math.max(0, toNumber(clip.transitions?.inPoint?.duration, 0)));
 			const outDuration = Math.min(length, Math.max(0, toNumber(clip.transitions?.outPoint?.duration, 0)));
+			const inEasing = toEasing(clip.transitions?.inPoint?.easing);
+			const outEasing = toEasing(clip.transitions?.outPoint?.easing);
 
 			return {
 				id: String(clip.id ?? `clip-${index + 1}`),
@@ -113,11 +483,43 @@ const normalizeClips = (clips: RenderTextClipInput[]): NormalizedClip[] => {
 				length,
 				zIndex,
 				fontSize,
+				fontFamily,
+				fontWeight,
+				textTransform,
+				textAlign,
+				strokeColor,
+				strokeWidth,
+				letterSpacing,
+				letterSpacingUnit,
+				letterSpacingPx,
+				lineHeight,
+				opacity,
+				shadowColor,
+				shadowBlur,
+				shadowOffsetX,
+				shadowOffsetY,
+				shadowOpacity,
+				shadowEnabled,
+				glowColor,
+				glowStrength,
+				glowEnabled,
+				glowBlur,
+				glowOpacity,
+				backgroundColor,
+				backgroundPaddingX,
+				backgroundPaddingY,
+				backgroundRadius,
+				backgroundEnabled,
+				backgroundOpacity,
+				backgroundBorderColor,
+				backgroundBorderWidth,
 				color: String(clip.color ?? "white"),
 				x,
 				y,
 				inDuration,
 				outDuration,
+				inEasing,
+				outEasing,
 			};
 		})
 		.filter((clip) => clip.text.length > 0)
@@ -196,24 +598,99 @@ export async function POST(request: Request) {
 
 	let currentLabel = "base0";
 	const filterParts: string[] = ["[0:v]format=yuv420p[base0]"];
+	let hasNegativeLetterSpacing = false;
+	let hasTextAlignApproximation = false;
+	let hasShadowBlurApproximation = false;
+	let hasGlowApproximation = false;
+	let hasBackgroundRadiusApproximation = false;
 
 	normalizedClips.forEach((clip, index) => {
-		const nextLabel = `txt${index}`;
-		const escapedText = escapeDrawText(clip.text);
-		const xExpression = `(w-text_w)*${clip.x.toFixed(3)}`;
+		const fillLabel = `txt${index}`;
+		if (clip.letterSpacingPx < -0.01) {
+			hasNegativeLetterSpacing = true;
+		}
+		const transformedText = applyTextTransform(clip.text, clip.textTransform);
+		const alignedText = applyTextAlignApproximation(transformedText, clip.textAlign);
+		if (clip.textAlign !== "left") {
+			hasTextAlignApproximation = true;
+		}
+		const approximatedText = applyLetterSpacingApproximation(alignedText, clip.letterSpacingPx);
+		const escapedText = escapeDrawText(approximatedText);
+		const fontPattern = `${clip.fontFamily}:style=${toFontStyleName(clip.fontWeight)}`;
+		const escapedFontPattern = escapeDrawText(fontPattern);
+		const lineSpacing = Math.max(0, Math.round(clip.fontSize * (clip.lineHeight - 1)));
+		const xExpression = `(w*${clip.x.toFixed(3)}-text_w/2)`;
 		const yExpression = `(h-text_h)*${clip.y.toFixed(3)}`;
 		const inEnd = clip.start + clip.inDuration;
 		const outStart = clip.end - clip.outDuration;
+		const inProgress = `(t-${clip.start.toFixed(3)})/${Math.max(clip.inDuration, 0.001).toFixed(3)}`;
+		const outProgress = `(t-${outStart.toFixed(3)})/${Math.max(clip.outDuration, 0.001).toFixed(3)}`;
+		const inAlpha = getEasedProgressExpression(inProgress, clip.inEasing);
+		const outAlpha = `1-(${getEasedProgressExpression(outProgress, clip.outEasing)})`;
 
 		const alphaExpression =
 			clip.inDuration > 0 || clip.outDuration > 0
-				? `if(lt(t,${inEnd.toFixed(3)}),(t-${clip.start.toFixed(3)})/${Math.max(clip.inDuration, 0.001).toFixed(3)},if(gt(t,${outStart.toFixed(3)}),(${clip.end.toFixed(3)}-t)/${Math.max(clip.outDuration, 0.001).toFixed(3)},1))`
+				? `if(lt(t,${inEnd.toFixed(3)}),${inAlpha},if(gt(t,${outStart.toFixed(3)}),${outAlpha},1))`
 				: "1";
+		const effectiveAlphaExpression =
+			clip.opacity >= 0.999 ? alphaExpression : `(${alphaExpression})*${clip.opacity.toFixed(3)}`;
+		const backgroundAlphaExpression =
+			clip.backgroundOpacity >= 0.999
+				? alphaExpression
+				: `(${alphaExpression})*${clip.backgroundOpacity.toFixed(3)}`;
+		if (clip.shadowEnabled && clip.shadowBlur > 0) {
+			hasShadowBlurApproximation = true;
+		}
+		if (clip.glowEnabled) {
+			hasGlowApproximation = true;
+		}
+		if (clip.backgroundEnabled && clip.backgroundRadius > 0) {
+			hasBackgroundRadiusApproximation = true;
+		}
+		const shadowOptions =
+			clip.glowEnabled && clip.glowOpacity > 0 && clip.glowStrength > 0
+				? `:shadowcolor=${clip.glowColor}@${clip.glowOpacity.toFixed(3)}:shadowx=0:shadowy=0`
+				: clip.shadowEnabled && clip.shadowOpacity > 0
+					? `:shadowcolor=${clip.shadowColor}@${clip.shadowOpacity.toFixed(3)}:shadowx=${clip.shadowOffsetX.toFixed(2)}:shadowy=${clip.shadowOffsetY.toFixed(2)}`
+					: ":shadowcolor=#000000@0:shadowx=0:shadowy=0";
+		let textInputLabel = currentLabel;
+		if (clip.backgroundEnabled && (clip.backgroundOpacity > 0 || clip.backgroundBorderWidth > 0)) {
+			const bgFillLabel = `txt${index}bgf`;
+			const bgInnerPad = `${clip.backgroundPaddingY.toFixed(2)}|${clip.backgroundPaddingX.toFixed(2)}|${clip.backgroundPaddingY.toFixed(2)}|${clip.backgroundPaddingX.toFixed(2)}`;
+			if (clip.backgroundBorderWidth > 0) {
+				const bgBorderLabel = `txt${index}bgb`;
+				const outerPadY = clip.backgroundPaddingY + clip.backgroundBorderWidth;
+				const outerPadX = clip.backgroundPaddingX + clip.backgroundBorderWidth;
+				const bgOuterPad = `${outerPadY.toFixed(2)}|${outerPadX.toFixed(2)}|${outerPadY.toFixed(2)}|${outerPadX.toFixed(2)}`;
+				filterParts.push(
+					`[${currentLabel}]drawtext=text='${escapedText}':font='${escapedFontPattern}':fontsize=${clip.fontSize}:fontcolor=white@0:box=1:boxcolor=${clip.backgroundBorderColor}:boxborderw=${bgOuterPad}:x=${xExpression}:y=${yExpression}:alpha='${backgroundAlphaExpression}':enable='between(t,${clip.start.toFixed(3)},${clip.end.toFixed(3)})'[${bgBorderLabel}]`
+				);
+				filterParts.push(
+					`[${bgBorderLabel}]drawtext=text='${escapedText}':font='${escapedFontPattern}':fontsize=${clip.fontSize}:fontcolor=white@0:box=1:boxcolor=${clip.backgroundColor}:boxborderw=${bgInnerPad}:x=${xExpression}:y=${yExpression}:alpha='${backgroundAlphaExpression}':enable='between(t,${clip.start.toFixed(3)},${clip.end.toFixed(3)})'[${bgFillLabel}]`
+				);
+			} else {
+				filterParts.push(
+					`[${currentLabel}]drawtext=text='${escapedText}':font='${escapedFontPattern}':fontsize=${clip.fontSize}:fontcolor=white@0:box=1:boxcolor=${clip.backgroundColor}:boxborderw=${bgInnerPad}:x=${xExpression}:y=${yExpression}:alpha='${backgroundAlphaExpression}':enable='between(t,${clip.start.toFixed(3)},${clip.end.toFixed(3)})'[${bgFillLabel}]`
+				);
+			}
+			textInputLabel = bgFillLabel;
+		}
 
-		filterParts.push(
-			`[${currentLabel}]drawtext=text='${escapedText}':fontsize=${clip.fontSize}:fontcolor=${clip.color}:x=${xExpression}:y=${yExpression}:alpha='${alphaExpression}':enable='between(t,${clip.start.toFixed(3)},${clip.end.toFixed(3)})'[${nextLabel}]`
-		);
-		currentLabel = nextLabel;
+		if (clip.strokeWidth > 0) {
+			const strokeLabel = `txt${index}s`;
+			filterParts.push(
+				`[${textInputLabel}]drawtext=text='${escapedText}':font='${escapedFontPattern}':fontsize=${clip.fontSize}:fontcolor=white@0:bordercolor=${clip.strokeColor}:borderw=${(clip.strokeWidth * 2).toFixed(2)}:line_spacing=${lineSpacing}:x=${xExpression}:y=${yExpression}:alpha='${effectiveAlphaExpression}':enable='between(t,${clip.start.toFixed(3)},${clip.end.toFixed(3)})'[${strokeLabel}]`
+			);
+			filterParts.push(
+				`[${strokeLabel}]drawtext=text='${escapedText}':font='${escapedFontPattern}':fontsize=${clip.fontSize}:fontcolor=${clip.color}:borderw=0${shadowOptions}:line_spacing=${lineSpacing}:x=${xExpression}:y=${yExpression}:alpha='${effectiveAlphaExpression}':enable='between(t,${clip.start.toFixed(3)},${clip.end.toFixed(3)})'[${fillLabel}]`
+			);
+		} else {
+			filterParts.push(
+				`[${textInputLabel}]drawtext=text='${escapedText}':font='${escapedFontPattern}':fontsize=${clip.fontSize}:fontcolor=${clip.color}:borderw=0${shadowOptions}:line_spacing=${lineSpacing}:x=${xExpression}:y=${yExpression}:alpha='${effectiveAlphaExpression}':enable='between(t,${clip.start.toFixed(3)},${clip.end.toFixed(3)})'[${fillLabel}]`
+			);
+		}
+
+		currentLabel = fillLabel;
 	});
 
 	ffmpegArgs.push(
@@ -234,12 +711,29 @@ export async function POST(request: Request) {
 
 	try {
 		await runFfmpeg(ffmpegArgs);
+		const notes: string[] = [];
+		if (hasNegativeLetterSpacing) {
+			notes.push("Negative letter spacing is not directly supported by FFmpeg drawtext and is only approximated.");
+		}
+		if (hasTextAlignApproximation) {
+			notes.push("Center/Right multiline alignment is approximated in export output.");
+		}
+		if (hasShadowBlurApproximation) {
+			notes.push("Shadow blur is not directly supported by FFmpeg drawtext and is approximated without blur.");
+		}
+		if (hasGlowApproximation) {
+			notes.push("Glow is approximated using FFmpeg drawtext shadow settings and does not fully match editor glow blur/spread.");
+		}
+		if (hasBackgroundRadiusApproximation) {
+			notes.push("Background corner radius is not directly supported by FFmpeg drawtext box and is approximated as square corners.");
+		}
 		return NextResponse.json(
 			{
 				ok: true,
 				fileName,
 				url: `/renders/${fileName}`,
 				command: `ffmpeg ${ffmpegArgs.join(" ")}`,
+				notes,
 			},
 			{ status: 200 }
 		);
