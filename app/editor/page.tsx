@@ -23,9 +23,12 @@ import { CSS } from "@dnd-kit/utilities";
 import { Canvas, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import {
+	hasEditorClipsSnapshot,
 	readEditorClips,
+	readEditorProjectId,
 	readEditorSelectedClipId,
 	writeEditorClips,
+	writeEditorProjectId,
 	writeEditorSelectedClipId,
 } from "@/lib/editorClipStorage";
 
@@ -173,6 +176,24 @@ const createInitialProjectContent = (): ProjectEditorContent => ({
 	clips: [],
 	selectedClipId: "",
 });
+
+const parseProjectIdFromQueryValue = (value: string | null): number | null => {
+	if (!value) {
+		return null;
+	}
+
+	const normalizedValue = value.trim().replace(/\/+$/, "");
+	if (!normalizedValue) {
+		return null;
+	}
+
+	const id = Number(normalizedValue);
+	if (!Number.isInteger(id) || id <= 0) {
+		return null;
+	}
+
+	return id;
+};
 
 const parseProjectEditorContent = (content: string): ProjectEditorContent => {
 	try {
@@ -762,39 +783,6 @@ const normalizeClip = (clip: ClipItem): ClipItem => {
 	};
 };
 
-const getTransitionProgress = (clip: ClipItem, currentTime: number): number => {
-	const localTime = currentTime - clip.start;
-	const inDuration = clip.transitions.inPoint.duration;
-	const outDuration = clip.transitions.outPoint.duration;
-	const inStrength = inDuration > 0 ? clamp((inDuration - localTime) / inDuration, 0, 1) : 0;
-	const outStrength = outDuration > 0 ? clamp((localTime - (clip.length - outDuration)) / outDuration, 0, 1) : 0;
-	const inWeighted = clip.transitions.inPoint.effect === "none" ? 0 : inStrength;
-	const outWeighted = clip.transitions.outPoint.effect === "none" ? 0 : outStrength;
-	return clamp(Math.max(inWeighted, outWeighted), 0, 1);
-};
-
-const resolveActiveTransitionEffect = (clip: ClipItem, currentTime: number): TransitionType => {
-	const localTime = currentTime - clip.start;
-
-	if (
-		clip.transitions.inPoint.effect !== "none" &&
-		clip.transitions.inPoint.duration > 0 &&
-		localTime <= clip.transitions.inPoint.duration
-	) {
-		return clip.transitions.inPoint.effect;
-	}
-
-	if (
-		clip.transitions.outPoint.effect !== "none" &&
-		clip.transitions.outPoint.duration > 0 &&
-		localTime >= clip.length - clip.transitions.outPoint.duration
-	) {
-		return clip.transitions.outPoint.effect;
-	}
-
-	return "none";
-};
-
 const getClipTransitionState = (clip: ClipItem, localTime: number) => {
 	const inDuration = clip.transitions.inPoint.duration;
 	const outDuration = clip.transitions.outPoint.duration;
@@ -878,9 +866,9 @@ const drawTextClip = (
 			shadowOffsetY = 0;
 		}
 	}
-	let glitchCharacterChaos = false;
-	let glitchChaosFrequency = 0;
-	let glitchChaosPower = 0;
+	const glitchCharacterChaos = false;
+	const glitchChaosFrequency = 0;
+	const glitchChaosPower = 0;
 	let pixelateCellSize = 1;
 	let pixelatePower = 0;
 	let rgbShiftBaseAngle = 0;
@@ -1282,8 +1270,6 @@ const ShaderPlane = ({
 		sourceCanvasBRef.current = b.canvas;
 		sourceTextureARef.current = a.texture;
 		sourceTextureBRef.current = b.texture;
-		uniforms.u_textureA.value = a.texture;
-		uniforms.u_textureB.value = b.texture;
 
 		return () => {
 			a.texture.dispose();
@@ -1293,14 +1279,15 @@ const ShaderPlane = ({
 			sourceTextureARef.current = null;
 			sourceTextureBRef.current = null;
 		};
-	}, [uniforms]);
+	}, []);
 
 	useFrame((state) => {
 		const sourceCanvasA = sourceCanvasARef.current;
 		const sourceCanvasB = sourceCanvasBRef.current;
 		const textureA = sourceTextureARef.current;
 		const textureB = sourceTextureBRef.current;
-		if (!sourceCanvasA || !sourceCanvasB || !textureA || !textureB || !materialRef.current) {
+		const material = materialRef.current;
+		if (!sourceCanvasA || !sourceCanvasB || !textureA || !textureB || !material) {
 			return;
 		}
 
@@ -1320,11 +1307,13 @@ const ShaderPlane = ({
 
 		textureA.needsUpdate = true;
 		textureB.needsUpdate = true;
-		uniforms.u_time.value = state.clock.elapsedTime;
-		uniforms.u_progress.value = 0;
-		uniforms.u_effectType.value = effectCodeMap.none;
-		uniforms.u_hasOverlay.value = 0;
-		uniforms.u_resolution.value.set(sourceCanvasA.width, sourceCanvasA.height);
+		material.uniforms.u_textureA.value = textureA;
+		material.uniforms.u_textureB.value = textureB;
+		material.uniforms.u_time.value = state.clock.elapsedTime;
+		material.uniforms.u_progress.value = 0;
+		material.uniforms.u_effectType.value = effectCodeMap.none;
+		material.uniforms.u_hasOverlay.value = 0;
+		material.uniforms.u_resolution.value.set(sourceCanvasA.width, sourceCanvasA.height);
 	});
 
 	return (
@@ -1522,7 +1511,7 @@ export default function EditorPage() {
 		[clips, selectedClipId]
 	);
 	const normalizedCurrentTitle = useMemo(() => projectTitle.trim(), [projectTitle]);
-	const hasUnsavedChanges = useMemo(() => {
+	const hasUnsavedChanges = useCallback(() => {
 		if (!projectId) {
 			return false;
 		}
@@ -1534,9 +1523,22 @@ export default function EditorPage() {
 	}, [currentContent, normalizedCurrentTitle, projectId]);
 
 	const syncEditorStateFromStorage = useCallback(() => {
+		if (!projectIdFromQuery) {
+			return;
+		}
+
+		const storedProjectId = readEditorProjectId();
+		if (storedProjectId !== String(projectIdFromQuery)) {
+			return;
+		}
+
+		if (!hasEditorClipsSnapshot()) {
+			return;
+		}
+
 		setClips(readEditorClips<ClipItem>(initialClips).map(normalizeClip));
 		setSelectedClipId(readEditorSelectedClipId());
-	}, []);
+	}, [projectIdFromQuery]);
 
 	useEffect(() => {
 		setMounted(true);
@@ -1550,13 +1552,7 @@ export default function EditorPage() {
 		const syncProjectIdFromQuery = () => {
 			const search = window.location.search;
 			const value = new URLSearchParams(search).get("projectId");
-			if (!value) {
-				setProjectIdFromQuery(null);
-				return;
-			}
-
-			const id = Number(value);
-			setProjectIdFromQuery(Number.isInteger(id) && id > 0 ? id : null);
+			setProjectIdFromQuery(parseProjectIdFromQueryValue(value));
 		};
 
 		syncProjectIdFromQuery();
@@ -1572,10 +1568,10 @@ export default function EditorPage() {
 			return;
 		}
 		syncEditorStateFromStorage();
-	}, [mounted, syncEditorStateFromStorage]);
+	}, [isQueryReady, mounted, syncEditorStateFromStorage]);
 
 	useEffect(() => {
-		if (!mounted) {
+		if (!mounted || !isQueryReady) {
 			return;
 		}
 
@@ -1600,14 +1596,24 @@ export default function EditorPage() {
 						return;
 					}
 					const projectContent = parseProjectEditorContent(data.content);
+					const storedProjectId = readEditorProjectId();
+					const hasLocalSnapshot =
+						storedProjectId === String(data.id) && hasEditorClipsSnapshot();
+					const restoredClips = hasLocalSnapshot
+						? readEditorClips<ClipItem>(projectContent.clips).map(normalizeClip)
+						: projectContent.clips;
+					const restoredSelectedClipId = hasLocalSnapshot
+						? readEditorSelectedClipId()
+						: projectContent.selectedClipId;
 					setProjectId(data.id);
 					setProjectTitle(data.title);
-					setClips(projectContent.clips);
-					setSelectedClipId(projectContent.selectedClipId);
+					setClips(restoredClips);
+					setSelectedClipId(restoredSelectedClipId);
 					lastSavedTitleRef.current = data.title;
 					lastSavedContentRef.current = stringifyProjectEditorContent(projectContent);
-					writeEditorClips(projectContent.clips.map(normalizeClip));
-					writeEditorSelectedClipId(projectContent.selectedClipId);
+					writeEditorProjectId(String(data.id));
+					writeEditorClips(restoredClips.map(normalizeClip));
+					writeEditorSelectedClipId(restoredSelectedClipId);
 					return;
 				}
 
@@ -1634,6 +1640,7 @@ export default function EditorPage() {
 				setSelectedClipId("");
 				lastSavedTitleRef.current = data.title;
 				lastSavedContentRef.current = stringifyProjectEditorContent(createInitialProjectContent());
+				writeEditorProjectId(String(data.id));
 				writeEditorClips([]);
 				writeEditorSelectedClipId("");
 				router.replace(`/editor?projectId=${data.id}`);
@@ -1657,41 +1664,21 @@ export default function EditorPage() {
 	}, [isQueryReady, mounted, projectIdFromQuery, router]);
 
 	useEffect(() => {
-		if (!mounted) {
+		if (!mounted || isProjectLoading) {
 			return;
 		}
-
-		const handleFocus = () => {
-			syncEditorStateFromStorage();
-		};
-
-		const handleVisibilityChange = () => {
-			if (document.visibilityState === "visible") {
-				syncEditorStateFromStorage();
-			}
-		};
-
-		window.addEventListener("focus", handleFocus);
-		document.addEventListener("visibilitychange", handleVisibilityChange);
-		return () => {
-			window.removeEventListener("focus", handleFocus);
-			document.removeEventListener("visibilitychange", handleVisibilityChange);
-		};
-	}, [mounted, syncEditorStateFromStorage]);
-
-	useEffect(() => {
-		if (!mounted) {
-			return;
+		if (projectId) {
+			writeEditorProjectId(String(projectId));
 		}
 		writeEditorClips(clips.map(normalizeClip));
-	}, [clips, mounted]);
+	}, [clips, isProjectLoading, mounted, projectId]);
 
 	useEffect(() => {
-		if (!mounted) {
+		if (!mounted || isProjectLoading) {
 			return;
 		}
 		writeEditorSelectedClipId(selectedClipId);
-	}, [mounted, selectedClipId]);
+	}, [isProjectLoading, mounted, selectedClipId]);
 
 	useEffect(() => {
 		if (!projectStatus) {
@@ -1855,10 +1842,14 @@ export default function EditorPage() {
 	const openClipSettings = useCallback(
 		(clipId: string) => {
 			setSelectedClipId(clipId);
-			const query = projectId ? `?projectId=${projectId}` : "";
-			router.push(`/editor/clip/${clipId}${query}`);
+			const query = new URLSearchParams({ clipId });
+			const currentProjectId = projectId ?? projectIdFromQuery;
+			if (currentProjectId) {
+				query.set("projectId", String(currentProjectId));
+			}
+			router.push(`/editor/clip?${query.toString()}`);
 		},
-		[projectId, router]
+		[projectId, projectIdFromQuery, router]
 	);
 
 	const handleSaveProject = useCallback(async (): Promise<boolean> => {
@@ -1897,7 +1888,7 @@ export default function EditorPage() {
 		} finally {
 			setIsSavingProject(false);
 		}
-	}, [currentContent, isSavingProject, normalizedCurrentTitle, projectId, projectTitle]);
+	}, [clips, currentContent, isSavingProject, normalizedCurrentTitle, projectId, projectTitle, selectedClipId]);
 
 	const handleExitWithSave = useCallback(async () => {
 		if (isExitProcessing) {
@@ -1920,7 +1911,7 @@ export default function EditorPage() {
 	}, [isExitProcessing, router]);
 
 	const handleDashboardClick = useCallback(() => {
-		if (!hasUnsavedChanges) {
+		if (!hasUnsavedChanges()) {
 			router.push("/dashboard");
 			return;
 		}
@@ -2001,7 +1992,7 @@ export default function EditorPage() {
 				shadowOffsetX: 0,
 				shadowOffsetY: 2,
 				shadowOpacity: 0.45,
-				shadowEnabled: true,
+				shadowEnabled: false,
 				glowColor: "#60a5fa",
 				glowStrength: 1,
 				glowEnabled: false,

@@ -4,10 +4,10 @@ import path from "node:path";
 
 import { NextResponse } from "next/server";
 
+import { githubPagesUnavailableResponse, isGitHubPagesBuild } from "@/lib/apiRouteUtils";
+
 export const runtime = "nodejs";
 export const dynamic = "force-static";
-
-const isGitHubPagesBuild = process.env.GITHUB_PAGES === "true";
 
 type TransitionType = "none" | "fade" | "slide" | "glitch" | "pixelate" | "rgbShift";
 type TransitionEasing = "linear" | "easeIn" | "easeOut" | "easeInOut";
@@ -581,7 +581,7 @@ const runFfmpeg = async (args: string[]): Promise<void> => {
 
 export async function POST(request: Request) {
 	if (isGitHubPagesBuild) {
-		return NextResponse.json({ error: "Not available on GitHub Pages." }, { status: 501 });
+		return githubPagesUnavailableResponse();
 	}
 
 	const body = await request.json().catch(() => null);

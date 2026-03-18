@@ -1,28 +1,16 @@
 import { NextResponse } from "next/server";
 
+import {
+  githubPagesUnavailableResponse,
+  isGitHubPagesBuild,
+  parsePositiveIntegerId,
+} from "@/lib/apiRouteUtils";
 import { prisma } from "@/lib/prisma";
 
-export const dynamic = "force-static";
-export const dynamicParams = false;
-
-export async function generateStaticParams() {
-  return [{ id: "sample" }];
-}
-
-const isGitHubPagesBuild = process.env.GITHUB_PAGES === "true";
+export const dynamic = "force-dynamic";
 
 type RouteParams = {
   params: Promise<{ id: string }>;
-};
-
-const parseProjectId = (value: string) => {
-  const id = Number(value);
-
-  if (!Number.isInteger(id) || id <= 0) {
-    return null;
-  }
-
-  return id;
 };
 
 const parseContentBody = (body: unknown) => {
@@ -56,11 +44,11 @@ const parseContentBody = (body: unknown) => {
 
 export async function GET(_: Request, { params }: RouteParams) {
   if (isGitHubPagesBuild) {
-    return NextResponse.json({ error: "Not available on GitHub Pages." }, { status: 501 });
+    return githubPagesUnavailableResponse();
   }
 
   const { id } = await params;
-  const projectId = parseProjectId(id);
+  const projectId = parsePositiveIntegerId(id);
 
   if (!projectId) {
     return NextResponse.json({ error: "Invalid project id." }, { status: 400 });
@@ -79,11 +67,11 @@ export async function GET(_: Request, { params }: RouteParams) {
 
 export async function PATCH(request: Request, { params }: RouteParams) {
   if (isGitHubPagesBuild) {
-    return NextResponse.json({ error: "Not available on GitHub Pages." }, { status: 501 });
+    return githubPagesUnavailableResponse();
   }
 
   const { id } = await params;
-  const projectId = parseProjectId(id);
+  const projectId = parsePositiveIntegerId(id);
 
   if (!projectId) {
     return NextResponse.json({ error: "Invalid project id." }, { status: 400 });
@@ -116,11 +104,11 @@ export async function PUT(request: Request, context: RouteParams) {
 
 export async function DELETE(_: Request, { params }: RouteParams) {
   if (isGitHubPagesBuild) {
-    return NextResponse.json({ error: "Not available on GitHub Pages." }, { status: 501 });
+    return githubPagesUnavailableResponse();
   }
 
   const { id } = await params;
-  const projectId = parseProjectId(id);
+  const projectId = parsePositiveIntegerId(id);
 
   if (!projectId) {
     return NextResponse.json({ error: "Invalid project id." }, { status: 400 });

@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 
+import { githubPagesUnavailableResponse, isGitHubPagesBuild } from "@/lib/apiRouteUtils";
 import { prisma } from "@/lib/prisma";
 
-export const dynamic = "force-static";
-
-const isGitHubPagesBuild = process.env.GITHUB_PAGES === "true";
+export const dynamic = "force-dynamic";
 
 type CreateProjectBody = {
   title: string;
@@ -36,7 +35,7 @@ const parseCreateProjectBody = (body: unknown): CreateProjectBody | null => {
 
 export async function GET() {
   if (isGitHubPagesBuild) {
-    return NextResponse.json({ error: "Not available on GitHub Pages." }, { status: 501 });
+    return githubPagesUnavailableResponse();
   }
 
   const projects = await prisma.project.findMany({
@@ -50,7 +49,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   if (isGitHubPagesBuild) {
-    return NextResponse.json({ error: "Not available on GitHub Pages." }, { status: 501 });
+    return githubPagesUnavailableResponse();
   }
 
   const payload = parseCreateProjectBody(await request.json());

@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
 	readEditorClips,
+	readEditorProjectId,
 	readEditorSelectedClipId,
 	writeEditorClips,
+	writeEditorProjectId,
 	writeEditorSelectedClipId,
 } from "@/lib/editorClipStorage";
 
@@ -275,7 +277,7 @@ const toShadowEnabled = (value: unknown): boolean => {
 	if (typeof value === "boolean") {
 		return value;
 	}
-	return true;
+	return false;
 };
 
 const toGlowStrength = (value: unknown): number => {
@@ -935,53 +937,52 @@ const getRgbShiftShadow = (
 	return `${dx}px ${dy}px ${hexColorToRgba(primaryColor, alpha)}, ${ndx}px ${ndy}px ${hexColorToRgba(secondaryColor, alpha)}, ${glow}`;
 };
 
-const mergeTextShadows = (...values: string[]): string => {
-	const items = values
-		.map((value) => value.trim())
-		.filter((value) => value.length > 0 && value !== "none");
-	return items.length > 0 ? items.join(", ") : "none";
-};
+const normalizeProjectIdValue = (value: string | null | undefined): string => {
+	if (!value) {
+		return "";
+	}
 
-const getConfiguredTextShadow = (clip: ClipItem): string => {
-	const baseShadow =
-		clip.shadowEnabled && clip.shadowOpacity > 0
-			? `${clip.shadowOffsetX}px ${clip.shadowOffsetY}px ${clip.shadowBlur}px ${hexColorToRgba(clip.shadowColor, clip.shadowOpacity)}`
-			: "none";
-	const glowShadow =
-		clip.glowEnabled && clip.glowOpacity > 0
-			? `0 0 ${(clip.glowBlur * Math.max(0.1, clip.glowStrength)).toFixed(2)}px ${hexColorToRgba(clip.glowColor, clip.glowOpacity)}`
-			: "none";
-	return mergeTextShadows(baseShadow, glowShadow);
+	const normalizedValue = value.trim().replace(/\/+$/, "");
+	if (!normalizedValue) {
+		return "";
+	}
+
+	const id = Number(normalizedValue);
+	if (!Number.isInteger(id) || id <= 0) {
+		return "";
+	}
+
+	return String(id);
 };
 
 export default function ClipSettingsClient() {
 	const params = useParams<{ clipId: string }>();
 	const router = useRouter();
 	const searchParams = useSearchParams();
-	const clipId = params.clipId;
-	const projectIdFromQuery = searchParams.get("projectId");
-	const backToEditorPath = projectIdFromQuery ? `/editor?projectId=${encodeURIComponent(projectIdFromQuery)}` : "/editor";
+	const clipIdFromParams = params?.clipId;
+	const clipIdFromQuery = searchParams.get("clipId") ?? undefined;
+	const clipId = clipIdFromParams ?? clipIdFromQuery;
+	const [storedProjectId] = useState(() => readEditorProjectId());
+	const projectIdFromQuery = normalizeProjectIdValue(searchParams.get("projectId"));
+	const effectiveProjectId = projectIdFromQuery || normalizeProjectIdValue(storedProjectId);
+	const backToEditorPath = effectiveProjectId ? `/editor?projectId=${encodeURIComponent(effectiveProjectId)}` : "/editor";
 	const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-	const [mounted, setMounted] = useState(false);
-	const [clips, setClips] = useState<ClipItem[]>([]);
-	const [savedSelectedClipId, setSavedSelectedClipId] = useState("");
+	const [clips, setClips] = useState<ClipItem[]>(() => readEditorClips<ClipItem>([]).map(normalizeClip));
+	const [savedSelectedClipId] = useState(() => readEditorSelectedClipId());
 	const [previewTime, setPreviewTime] = useState(0);
 	const [isPlaying, setIsPlaying] = useState(false);
 	const [isLooping, setIsLooping] = useState(true);
 
 	useEffect(() => {
-		setMounted(true);
-		setClips(readEditorClips<ClipItem>([]).map(normalizeClip));
-		setSavedSelectedClipId(readEditorSelectedClipId());
-	}, []);
+		if (effectiveProjectId) {
+			writeEditorProjectId(effectiveProjectId);
+		}
+	}, [effectiveProjectId]);
 
 	useEffect(() => {
-		if (!mounted) {
-			return;
-		}
 		writeEditorClips(clips);
-	}, [clips, mounted]);
+	}, [clips]);
 
 	const activeClipId = useMemo(() => {
 		if (!clipId) {
@@ -1002,11 +1003,11 @@ export default function ClipSettingsClient() {
 	}, [clipId, clips, savedSelectedClipId]);
 
 	useEffect(() => {
-		if (!mounted || !activeClipId) {
+		if (!activeClipId) {
 			return;
 		}
 		writeEditorSelectedClipId(activeClipId);
-	}, [activeClipId, mounted]);
+	}, [activeClipId]);
 
 	const selectedClip = useMemo(() => {
 		if (!activeClipId) {
@@ -1014,6 +1015,13 @@ export default function ClipSettingsClient() {
 		}
 		return clips.find((clip) => clip.id === activeClipId);
 	}, [activeClipId, clips]);
+
+	const previewTimeWithinClip = useMemo(() => {
+		if (!selectedClip) {
+			return 0;
+		}
+		return clamp(previewTime, 0, selectedClip.length);
+	}, [previewTime, selectedClip]);
 
 	const updateSelectedClip = useCallback(
 		<K extends keyof ClipItem>(key: K, value: ClipItem[K]) => {
@@ -1149,34 +1157,36 @@ export default function ClipSettingsClient() {
 	);
 
 	useEffect(() => {
-		if (!selectedClip) {
-			setPreviewTime(0);
-			setIsPlaying(false);
-			return;
-		}
-
-		setPreviewTime((prev) => clamp(prev, 0, selectedClip.length));
-	}, [selectedClip]);
-
-	useEffect(() => {
 		if (!selectedClip || !isPlaying) {
 			return;
 		}
 
+		const clipLength = Math.max(selectedClip.length, 0);
 		let animationFrameId = 0;
 		let previousTimestamp = performance.now();
 
 		const tick = (timestamp: number) => {
 			const deltaTime = (timestamp - previousTimestamp) / 1000;
 			previousTimestamp = timestamp;
+			let shouldContinue = true;
 
 			setPreviewTime((prev) => {
-				const next = prev + deltaTime;
-				if (isLooping && selectedClip.length > 0) {
-					return next % selectedClip.length;
+				const base = clamp(prev, 0, clipLength);
+				const next = base + deltaTime;
+				if (isLooping && clipLength > 0) {
+					return next % clipLength;
 				}
-				return Math.min(next, selectedClip.length);
+				if (next >= clipLength) {
+					shouldContinue = false;
+					return clipLength;
+				}
+				return next;
 			});
+
+			if (!shouldContinue) {
+				setIsPlaying(false);
+				return;
+			}
 
 			animationFrameId = requestAnimationFrame(tick);
 		};
@@ -1184,16 +1194,6 @@ export default function ClipSettingsClient() {
 		animationFrameId = requestAnimationFrame(tick);
 		return () => cancelAnimationFrame(animationFrameId);
 	}, [selectedClip, isPlaying, isLooping]);
-
-	useEffect(() => {
-		if (!selectedClip || !isPlaying || isLooping) {
-			return;
-		}
-
-		if (previewTime >= selectedClip.length) {
-			setIsPlaying(false);
-		}
-	}, [selectedClip, isPlaying, isLooping, previewTime]);
 
 	useEffect(() => {
 		const canvas = previewCanvasRef.current;
@@ -1214,18 +1214,8 @@ export default function ClipSettingsClient() {
 			return;
 		}
 
-		drawPreviewTextClip(context, canvas, selectedClip, previewTime);
-	}, [selectedClip, previewTime]);
-
-	if (!mounted) {
-		return (
-			<main className="mx-auto w-full max-w-3xl space-y-4 px-4 py-6 text-white">
-				<section className="rounded-lg bg-zinc-900 p-4">
-					<p className="text-sm text-white/70">読み込み中...</p>
-				</section>
-			</main>
-		);
-	}
+		drawPreviewTextClip(context, canvas, selectedClip, previewTimeWithinClip);
+	}, [selectedClip, previewTimeWithinClip]);
 
 	const selectedClipSupportedFontWeights = selectedClip ? getSupportedFontWeights(selectedClip.fontFamily) : fontWeightOptions;
 	const isSelectedFontWeightLocked = selectedClipSupportedFontWeights.length <= 1;
@@ -1291,8 +1281,8 @@ export default function ClipSettingsClient() {
 								ループ {isLooping ? "ON" : "OFF"}
 							</button>
 							<p className="ml-auto text-white/70">
-								現在 {formatTimeSeconds(previewTime)} / 全体 {formatTimeSeconds(selectedClip.length)}
-								（{formatTimeMilliseconds(previewTime)} / {formatTimeMilliseconds(selectedClip.length)}）
+								現在 {formatTimeSeconds(previewTimeWithinClip)} / 全体 {formatTimeSeconds(selectedClip.length)}
+								（{formatTimeMilliseconds(previewTimeWithinClip)} / {formatTimeMilliseconds(selectedClip.length)}）
 							</p>
 						</div>
 						<div className="mt-2 grid grid-cols-1 gap-2 text-xs sm:grid-cols-[minmax(0,1fr)_9rem]">
@@ -1327,7 +1317,7 @@ export default function ClipSettingsClient() {
 								min={0}
 								max={selectedClip.length}
 								step={0.001}
-								value={previewTime}
+								value={previewTimeWithinClip}
 								className="w-full accent-sky-400"
 								onChange={(event) => setPreviewTime(clamp(Number(event.target.value), 0, selectedClip.length))}
 							/>
