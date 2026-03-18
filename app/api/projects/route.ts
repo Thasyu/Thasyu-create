@@ -3,8 +3,6 @@ import { NextResponse } from "next/server";
 import { githubPagesUnavailableResponse, isGitHubPagesBuild } from "@/lib/apiRouteUtils";
 import { prisma } from "@/lib/prisma";
 
-export const dynamic = "force-dynamic";
-
 type CreateProjectBody = {
   title: string;
   content: string;

@@ -1,5 +1,12 @@
 import { redirect } from "next/navigation";
 
+export const dynamic = "force-static";
+export const dynamicParams = false;
+
+export async function generateStaticParams() {
+	return [{ clipId: "sample" }];
+}
+
 type ClipSettingsLegacyPageProps = {
 	params: Promise<{ clipId: string }>;
 	searchParams?: Promise<{ projectId?: string | string[] }>;

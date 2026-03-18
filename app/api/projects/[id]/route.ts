@@ -7,8 +7,6 @@ import {
 } from "@/lib/apiRouteUtils";
 import { prisma } from "@/lib/prisma";
 
-export const dynamic = "force-dynamic";
-
 type RouteParams = {
   params: Promise<{ id: string }>;
 };

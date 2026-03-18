@@ -1,5 +1,11 @@
+import { Suspense } from "react";
+
 import ClipSettingsClient from "./[clipId]/ClipSettingsClient";
 
 export default function ClipSettingsIndexPage() {
-	return <ClipSettingsClient />;
+	return (
+		<Suspense fallback={null}>
+			<ClipSettingsClient />
+		</Suspense>
+	);
 }
