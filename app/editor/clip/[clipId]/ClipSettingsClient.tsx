@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
 	readEditorClips,
 	readEditorSelectedClipId,
@@ -16,6 +16,8 @@ type LegacyRgbShiftChannelMapping = "r-gb" | "rg-b" | "r-g-b";
 type LetterSpacingUnit = "px" | "em";
 type TextAlignMode = "left" | "center" | "right";
 type TextTransformMode = "none" | "uppercase" | "lowercase";
+type AnchorXMode = "left" | "center" | "right";
+type AnchorYMode = "top" | "middle" | "bottom";
 
 type ClipTransitionPoint = {
 	duration: number;
@@ -90,6 +92,8 @@ type ClipItem = {
 	backgroundBorderWidth: number;
 	positionX: number;
 	positionY: number;
+	anchorX: AnchorXMode;
+	anchorY: AnchorYMode;
 	transitions: ClipTransitions;
 	accent: ClipAccent;
 };
@@ -172,6 +176,14 @@ const isTextTransformMode = (value: unknown): value is TextTransformMode => {
 	return value === "none" || value === "uppercase" || value === "lowercase";
 };
 
+const isAnchorXMode = (value: unknown): value is AnchorXMode => {
+	return value === "left" || value === "center" || value === "right";
+};
+
+const isAnchorYMode = (value: unknown): value is AnchorYMode => {
+	return value === "top" || value === "middle" || value === "bottom";
+};
+
 const toFontFamily = (value: unknown): string => {
 	if (typeof value !== "string") {
 		return defaultFontFamily;
@@ -205,6 +217,14 @@ const toTextAlignMode = (value: unknown): TextAlignMode => {
 
 const toTextTransformMode = (value: unknown): TextTransformMode => {
 	return isTextTransformMode(value) ? value : "none";
+};
+
+const toAnchorXMode = (value: unknown): AnchorXMode => {
+	return isAnchorXMode(value) ? value : "center";
+};
+
+const toAnchorYMode = (value: unknown): AnchorYMode => {
+	return isAnchorYMode(value) ? value : "middle";
 };
 
 const applyTextTransform = (text: string, mode: TextTransformMode): string => {
@@ -509,6 +529,8 @@ const normalizeClip = (clip: ClipItem): ClipItem => {
 	const normalizedLetterSpacingUnit = toLetterSpacingUnit(clip.letterSpacingUnit);
 	const normalizedTextTransform = toTextTransformMode(clip.textTransform);
 	const normalizedTextAlign = toTextAlignMode(clip.textAlign);
+	const normalizedAnchorX = toAnchorXMode(clip.anchorX);
+	const normalizedAnchorY = toAnchorYMode(clip.anchorY);
 	const rawTransitions = clip.transitions && typeof clip.transitions === "object" ? clip.transitions : ({} as ClipTransitions);
 	const rawAccent = clip.accent && typeof clip.accent === "object" ? clip.accent : {};
 	return {
@@ -546,6 +568,8 @@ const normalizeClip = (clip: ClipItem): ClipItem => {
 		backgroundBorderWidth: toBackgroundBorderWidth(clip.backgroundBorderWidth),
 		positionX: normalizedPositionX,
 		positionY: normalizedPositionY,
+		anchorX: normalizedAnchorX,
+		anchorY: normalizedAnchorY,
 		transitions: normalizeTransitionsByLength(
 			{
 				inPoint: normalizeTransitionPoint(rawTransitions.inPoint, "in", normalizedPositionX, normalizedPositionY),
@@ -635,6 +659,8 @@ const drawPreviewTextClip = (
 	let alpha = 1;
 	let drawX = normalizePositionRatio(clip.positionX) * sourceCanvas.width;
 	let drawY = normalizePositionRatio(clip.positionY) * sourceCanvas.height;
+	const anchorXMode = toAnchorXMode(clip.anchorX);
+	const anchorYMode = toAnchorYMode(clip.anchorY);
 	const hasBaseShadow = clip.shadowEnabled && clip.shadowOpacity > 0;
 	const hasGlow = clip.glowEnabled && clip.glowOpacity > 0 && clip.glowStrength > 0;
 	let textShadow = hasBaseShadow ? hexColorToRgba(clip.shadowColor, clip.shadowOpacity) : "rgba(0,0,0,0)";
@@ -789,8 +815,9 @@ const drawPreviewTextClip = (
 		measured.actualBoundingBoxDescent ?? measured.fontBoundingBoxDescent ?? Math.max(12, clip.fontSize) * 0.2
 	);
 
+	const blockLeft =
+		anchorXMode === "left" ? drawX - blockWidth : anchorXMode === "right" ? drawX : drawX - blockWidth / 2;
 	const getLineStartX = (lineWidth: number): number => {
-		const blockLeft = drawX - blockWidth / 2;
 		if (clip.textAlign === "left") {
 			return blockLeft;
 		}
@@ -801,7 +828,14 @@ const drawPreviewTextClip = (
 	};
 
 	const lineAdvance = Math.max(12, clip.fontSize) * clip.lineHeight;
-	const firstBaselineY = drawY - (((lines.length - 1) * lineAdvance) + (sharedDescent - sharedAscent)) / 2;
+	const textBlockHeight = (Math.max(1, lines.length) - 1) * lineAdvance + sharedAscent + sharedDescent;
+	const textBlockTopByAnchor =
+		anchorYMode === "top"
+			? drawY - textBlockHeight
+			: anchorYMode === "bottom"
+				? drawY
+				: drawY - textBlockHeight / 2;
+	const firstBaselineY = textBlockTopByAnchor + sharedAscent;
 	const lineBaselineYs = lines.map((_, lineIndex) => firstBaselineY + lineIndex * lineAdvance);
 	const textBlockTop = lines.reduce((minimum, _line, lineIndex) => {
 		const baselineY = lineBaselineYs[lineIndex] ?? drawY;
@@ -813,11 +847,11 @@ const drawPreviewTextClip = (
 	}, Number.NEGATIVE_INFINITY);
 
 	if (clip.backgroundEnabled && (clip.backgroundOpacity > 0 || clip.backgroundBorderWidth > 0)) {
-		const textBlockHeight = Math.max(1, textBlockBottom - textBlockTop);
-		const backgroundLeft = drawX - blockWidth / 2 - clip.backgroundPaddingX;
+		const measuredTextBlockHeight = Math.max(1, textBlockBottom - textBlockTop);
+		const backgroundLeft = blockLeft - clip.backgroundPaddingX;
 		const backgroundTop = textBlockTop - clip.backgroundPaddingY;
 		const backgroundWidth = blockWidth + clip.backgroundPaddingX * 2;
-		const backgroundHeight = textBlockHeight + clip.backgroundPaddingY * 2;
+		const backgroundHeight = measuredTextBlockHeight + clip.backgroundPaddingY * 2;
 		context.save();
 		context.shadowColor = "rgba(0,0,0,0)";
 		context.shadowBlur = 0;
@@ -923,7 +957,10 @@ const getConfiguredTextShadow = (clip: ClipItem): string => {
 export default function ClipSettingsClient() {
 	const params = useParams<{ clipId: string }>();
 	const router = useRouter();
+	const searchParams = useSearchParams();
 	const clipId = params.clipId;
+	const projectIdFromQuery = searchParams.get("projectId");
+	const backToEditorPath = projectIdFromQuery ? `/editor?projectId=${encodeURIComponent(projectIdFromQuery)}` : "/editor";
 	const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
 	const [mounted, setMounted] = useState(false);
@@ -1204,7 +1241,7 @@ export default function ClipSettingsClient() {
 					<button
 						type="button"
 						className="rounded bg-white/10 px-3 py-1 text-sm hover:bg-white/20"
-						onClick={() => router.push("/editor")}
+						onClick={() => router.push(backToEditorPath)}
 					>
 						← Editorへ戻る
 					</button>
@@ -1758,6 +1795,30 @@ export default function ClipSettingsClient() {
 											updateSelectedClip("positionY", clamp(Number(event.target.value), 0, 1))
 										}
 									/>
+								</label>
+								<label className="space-y-1">
+									<span className="text-white/60">Anchor X</span>
+									<select
+										className="w-full rounded border border-white/20 bg-zinc-700 px-2 py-1 text-white"
+										value={selectedClip.anchorX}
+										onChange={(event) => updateSelectedClip("anchorX", toAnchorXMode(event.target.value))}
+									>
+										<option value="left" className="bg-zinc-700 text-white">left</option>
+										<option value="center" className="bg-zinc-700 text-white">center</option>
+										<option value="right" className="bg-zinc-700 text-white">right</option>
+									</select>
+								</label>
+								<label className="space-y-1">
+									<span className="text-white/60">Anchor Y</span>
+									<select
+										className="w-full rounded border border-white/20 bg-zinc-700 px-2 py-1 text-white"
+										value={selectedClip.anchorY}
+										onChange={(event) => updateSelectedClip("anchorY", toAnchorYMode(event.target.value))}
+									>
+										<option value="top" className="bg-zinc-700 text-white">top</option>
+										<option value="middle" className="bg-zinc-700 text-white">middle</option>
+										<option value="bottom" className="bg-zinc-700 text-white">bottom</option>
+									</select>
 								</label>
 							</div>
 						</div>

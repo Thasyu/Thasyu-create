@@ -15,6 +15,8 @@ type FontWeightValue = 300 | 400 | 500 | 700 | 900;
 type LetterSpacingUnit = "px" | "em";
 type TextAlignMode = "left" | "center" | "right";
 type TextTransformMode = "none" | "uppercase" | "lowercase";
+type AnchorXMode = "left" | "center" | "right";
+type AnchorYMode = "top" | "middle" | "bottom";
 
 const availableFonts = [
 	"Inter",
@@ -100,6 +102,8 @@ type RenderTextClipInput = {
 	color?: string;
 	positionX?: number;
 	positionY?: number;
+	anchorX?: AnchorXMode;
+	anchorY?: AnchorYMode;
 	transitions?: {
 		inPoint?: { duration?: number; effect?: TransitionType; easing?: TransitionEasing };
 		outPoint?: { duration?: number; effect?: TransitionType; easing?: TransitionEasing };
@@ -156,6 +160,8 @@ type NormalizedClip = {
 	color: string;
 	x: number;
 	y: number;
+	anchorX: AnchorXMode;
+	anchorY: AnchorYMode;
 	inDuration: number;
 	outDuration: number;
 	inEasing: TransitionEasing;
@@ -198,6 +204,14 @@ const isTextTransformMode = (value: unknown): value is TextTransformMode => {
 	return value === "none" || value === "uppercase" || value === "lowercase";
 };
 
+const isAnchorXMode = (value: unknown): value is AnchorXMode => {
+	return value === "left" || value === "center" || value === "right";
+};
+
+const isAnchorYMode = (value: unknown): value is AnchorYMode => {
+	return value === "top" || value === "middle" || value === "bottom";
+};
+
 const getSupportedFontWeights = (fontFamily: string): readonly FontWeightValue[] => {
 	return fontWeightsByFamily[fontFamily] ?? [300, 400, 500, 700, 900];
 };
@@ -220,6 +234,14 @@ const toTextAlignMode = (value: unknown): TextAlignMode => {
 
 const toTextTransformMode = (value: unknown): TextTransformMode => {
 	return isTextTransformMode(value) ? value : "none";
+};
+
+const toAnchorXMode = (value: unknown): AnchorXMode => {
+	return isAnchorXMode(value) ? value : "center";
+};
+
+const toAnchorYMode = (value: unknown): AnchorYMode => {
+	return isAnchorYMode(value) ? value : "middle";
 };
 
 const applyTextTransform = (text: string, mode: TextTransformMode): string => {
@@ -470,6 +492,8 @@ const normalizeClips = (clips: RenderTextClipInput[]): NormalizedClip[] => {
 			const backgroundBorderWidth = toBackgroundBorderWidth(clip.backgroundBorderWidth);
 			const x = Math.min(Math.max(toNumber(clip.positionX, 0.5), 0), 1);
 			const y = Math.min(Math.max(toNumber(clip.positionY, 0.5), 0), 1);
+			const anchorX = toAnchorXMode(clip.anchorX);
+			const anchorY = toAnchorYMode(clip.anchorY);
 			const inDuration = Math.min(length, Math.max(0, toNumber(clip.transitions?.inPoint?.duration, 0)));
 			const outDuration = Math.min(length, Math.max(0, toNumber(clip.transitions?.outPoint?.duration, 0)));
 			const inEasing = toEasing(clip.transitions?.inPoint?.easing);
@@ -516,6 +540,8 @@ const normalizeClips = (clips: RenderTextClipInput[]): NormalizedClip[] => {
 				color: String(clip.color ?? "white"),
 				x,
 				y,
+				anchorX,
+				anchorY,
 				inDuration,
 				outDuration,
 				inEasing,
@@ -619,8 +645,18 @@ export async function POST(request: Request) {
 		const fontPattern = `${clip.fontFamily}:style=${toFontStyleName(clip.fontWeight)}`;
 		const escapedFontPattern = escapeDrawText(fontPattern);
 		const lineSpacing = Math.max(0, Math.round(clip.fontSize * (clip.lineHeight - 1)));
-		const xExpression = `(w*${clip.x.toFixed(3)}-text_w/2)`;
-		const yExpression = `(h*${clip.y.toFixed(3)}-text_h/2)`;
+		const xExpression =
+			clip.anchorX === "left"
+				? `(w*${clip.x.toFixed(3)}-text_w)`
+				: clip.anchorX === "right"
+					? `(w*${clip.x.toFixed(3)})`
+					: `(w*${clip.x.toFixed(3)}-text_w/2)`;
+		const yExpression =
+			clip.anchorY === "top"
+				? `(h*${clip.y.toFixed(3)}-text_h)`
+				: clip.anchorY === "bottom"
+					? `(h*${clip.y.toFixed(3)})`
+					: `(h*${clip.y.toFixed(3)}-text_h/2)`;
 		const inEnd = clip.start + clip.inDuration;
 		const outStart = clip.end - clip.outDuration;
 		const inProgress = `(t-${clip.start.toFixed(3)})/${Math.max(clip.inDuration, 0.001).toFixed(3)}`;

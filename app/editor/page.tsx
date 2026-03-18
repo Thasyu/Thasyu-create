@@ -9,7 +9,7 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
 	DndContext,
 	DragEndEvent,
@@ -36,6 +36,8 @@ type LegacyRgbShiftChannelMapping = "r-gb" | "rg-b" | "r-g-b";
 type LetterSpacingUnit = "px" | "em";
 type TextAlignMode = "left" | "center" | "right";
 type TextTransformMode = "none" | "uppercase" | "lowercase";
+type AnchorXMode = "left" | "center" | "right";
+type AnchorYMode = "top" | "middle" | "bottom";
 
 type ClipTransitionPoint = {
 	duration: number;
@@ -117,6 +119,8 @@ type ClipItem = {
 	backgroundBorderWidth: number;
 	positionX: number;
 	positionY: number;
+	anchorX: AnchorXMode;
+	anchorY: AnchorYMode;
 	transitions: ClipTransitions;
 	accent: ClipAccent;
 };
@@ -140,6 +144,18 @@ type LayerState = {
 	activeClips: ActiveRenderClip[];
 };
 
+type ProjectRecord = {
+	id: number;
+	title: string;
+	content: string;
+	updatedAt: string;
+};
+
+type ProjectEditorContent = {
+	clips: ClipItem[];
+	selectedClipId: string;
+};
+
 const FPS = 30;
 const PIXELS_PER_SECOND = 80;
 const TRACK_COUNT = 4;
@@ -152,6 +168,45 @@ const textAssets: TextAsset[] = [
 ];
 
 const initialClips: ClipItem[] = [];
+
+const createInitialProjectContent = (): ProjectEditorContent => ({
+	clips: [],
+	selectedClipId: "",
+});
+
+const parseProjectEditorContent = (content: string): ProjectEditorContent => {
+	try {
+		const parsed = JSON.parse(content) as unknown;
+		if (Array.isArray(parsed)) {
+			return {
+				clips: parsed.map((clip) => normalizeClip(clip as ClipItem)),
+				selectedClipId: "",
+			};
+		}
+
+		if (parsed && typeof parsed === "object") {
+			const record = parsed as { clips?: unknown; selectedClipId?: unknown };
+			const parsedClips = Array.isArray(record.clips)
+				? record.clips.map((clip) => normalizeClip(clip as ClipItem))
+				: [];
+			return {
+				clips: parsedClips,
+				selectedClipId: typeof record.selectedClipId === "string" ? record.selectedClipId : "",
+			};
+		}
+	} catch {
+		return createInitialProjectContent();
+	}
+
+	return createInitialProjectContent();
+};
+
+const stringifyProjectEditorContent = (content: ProjectEditorContent): string => {
+	return JSON.stringify({
+		clips: content.clips.map(normalizeClip),
+		selectedClipId: content.selectedClipId,
+	});
+};
 
 const effectCodeMap: Record<TransitionType, number> = {
 	none: 0,
@@ -237,6 +292,14 @@ const isTextTransformMode = (value: unknown): value is TextTransformMode => {
 	return value === "none" || value === "uppercase" || value === "lowercase";
 };
 
+const isAnchorXMode = (value: unknown): value is AnchorXMode => {
+	return value === "left" || value === "center" || value === "right";
+};
+
+const isAnchorYMode = (value: unknown): value is AnchorYMode => {
+	return value === "top" || value === "middle" || value === "bottom";
+};
+
 const toFontFamily = (value: unknown): string => {
 	if (typeof value !== "string") {
 		return defaultFontFamily;
@@ -270,6 +333,14 @@ const toTextAlignMode = (value: unknown): TextAlignMode => {
 
 const toTextTransformMode = (value: unknown): TextTransformMode => {
 	return isTextTransformMode(value) ? value : "none";
+};
+
+const toAnchorXMode = (value: unknown): AnchorXMode => {
+	return isAnchorXMode(value) ? value : "center";
+};
+
+const toAnchorYMode = (value: unknown): AnchorYMode => {
+	return isAnchorYMode(value) ? value : "middle";
 };
 
 const applyTextTransform = (text: string, mode: TextTransformMode): string => {
@@ -640,6 +711,8 @@ const normalizeClip = (clip: ClipItem): ClipItem => {
 	const normalizedLetterSpacingUnit = toLetterSpacingUnit(clip.letterSpacingUnit);
 	const normalizedTextAlign = toTextAlignMode(clip.textAlign);
 	const normalizedTextTransform = toTextTransformMode(clip.textTransform);
+	const normalizedAnchorX = toAnchorXMode(clip.anchorX);
+	const normalizedAnchorY = toAnchorYMode(clip.anchorY);
 	const rawTransitions = clip.transitions && typeof clip.transitions === "object" ? clip.transitions : ({} as ClipTransitions);
 	const rawAccent = clip.accent && typeof clip.accent === "object" ? clip.accent : {};
 	return {
@@ -676,6 +749,8 @@ const normalizeClip = (clip: ClipItem): ClipItem => {
 		backgroundBorderWidth: toBackgroundBorderWidth(clip.backgroundBorderWidth),
 		positionX: normalizedPositionX,
 		positionY: normalizedPositionY,
+		anchorX: normalizedAnchorX,
+		anchorY: normalizedAnchorY,
 		transitions: normalizeTransitionsByLength(
 			{
 				inPoint: normalizeTransitionPoint(rawTransitions.inPoint, "in", normalizedPositionX, normalizedPositionY),
@@ -786,6 +861,8 @@ const drawTextClip = (
 	let alpha = 1;
 	let drawX = clamp(clip.positionX, 0, 1) * sourceCanvas.width;
 	let drawY = clamp(clip.positionY, 0, 1) * sourceCanvas.height;
+	const anchorXMode = toAnchorXMode(clip.anchorX);
+	const anchorYMode = toAnchorYMode(clip.anchorY);
 	const hasBaseShadow = clip.shadowEnabled && clip.shadowOpacity > 0;
 	const hasGlow = clip.glowEnabled && clip.glowOpacity > 0 && clip.glowStrength > 0;
 	let textShadow = hasBaseShadow ? hexToRgba(clip.shadowColor, clip.shadowOpacity) : "rgba(0,0,0,0)";
@@ -950,8 +1027,9 @@ const drawTextClip = (
 	};
 	const sharedGlyphMetrics = getSharedGlyphMetrics();
 	const lineGlyphMetrics = lines.map(() => sharedGlyphMetrics);
+	const blockLeft =
+		anchorXMode === "left" ? drawX - blockWidth : anchorXMode === "right" ? drawX : drawX - blockWidth / 2;
 	const getLineStartX = (lineWidth: number): number => {
-		const blockLeft = drawX - blockWidth / 2;
 		if (clip.textAlign === "left") {
 			return blockLeft;
 		}
@@ -963,8 +1041,14 @@ const drawTextClip = (
 	const lineAdvance = Math.max(12, clip.fontSize) * clip.lineHeight;
 	const sharedAscent = sharedGlyphMetrics.ascent;
 	const sharedDescent = sharedGlyphMetrics.descent;
-	const firstBaselineY =
-		drawY - (((lines.length - 1) * lineAdvance) + (sharedDescent - sharedAscent)) / 2;
+	const textBlockHeight = (Math.max(1, lines.length) - 1) * lineAdvance + sharedAscent + sharedDescent;
+	const textBlockTopByAnchor =
+		anchorYMode === "top"
+			? drawY - textBlockHeight
+			: anchorYMode === "bottom"
+				? drawY
+				: drawY - textBlockHeight / 2;
+	const firstBaselineY = textBlockTopByAnchor + sharedAscent;
 	const lineBaselineYs = lines.map((_, lineIndex) => firstBaselineY + lineIndex * lineAdvance);
 	const textBlockTop = lines.reduce((minimum, _line, lineIndex) => {
 		const baselineY = lineBaselineYs[lineIndex] ?? drawY;
@@ -977,11 +1061,11 @@ const drawTextClip = (
 		return Math.max(maximum, baselineY + metrics.descent);
 	}, Number.NEGATIVE_INFINITY);
 	if (clip.backgroundEnabled && (clip.backgroundOpacity > 0 || clip.backgroundBorderWidth > 0)) {
-		const textBlockHeight = Math.max(1, textBlockBottom - textBlockTop);
-		const backgroundLeft = drawX - blockWidth / 2 - clip.backgroundPaddingX;
+		const measuredTextBlockHeight = Math.max(1, textBlockBottom - textBlockTop);
+		const backgroundLeft = blockLeft - clip.backgroundPaddingX;
 		const backgroundTop = textBlockTop - clip.backgroundPaddingY;
 		const backgroundWidth = blockWidth + clip.backgroundPaddingX * 2;
-		const backgroundHeight = textBlockHeight + clip.backgroundPaddingY * 2;
+		const backgroundHeight = measuredTextBlockHeight + clip.backgroundPaddingY * 2;
 		context.save();
 		context.shadowColor = "rgba(0,0,0,0)";
 		context.shadowBlur = 0;
@@ -1401,15 +1485,34 @@ const TimelineTrack = ({
 
 export default function EditorPage() {
 	const router = useRouter();
+	const searchParams = useSearchParams();
 	const timelineCanvasRef = useRef<HTMLDivElement | null>(null);
 	const trimRef = useRef<TrimState | null>(null);
 	const rafRef = useRef<number | null>(null);
 	const lastFrameTimeRef = useRef<number | null>(null);
+	const lastSavedTitleRef = useRef("");
+	const lastSavedContentRef = useRef("");
 	const [mounted, setMounted] = useState(false);
+	const projectIdFromQuery = useMemo(() => {
+		const value = searchParams.get("projectId");
+		if (!value) {
+			return null;
+		}
+		const id = Number(value);
+		return Number.isInteger(id) && id > 0 ? id : null;
+	}, [searchParams]);
 
 	const [clips, setClips] = useState<ClipItem[]>(initialClips);
 	const [selectedClipId, setSelectedClipId] = useState<string>("");
 	const [selectedAssetId, setSelectedAssetId] = useState<string>(textAssets[0].id);
+	const [projectId, setProjectId] = useState<number | null>(null);
+	const [projectTitle, setProjectTitle] = useState("無題のプロジェクト");
+	const [projectError, setProjectError] = useState<string | null>(null);
+	const [projectStatus, setProjectStatus] = useState<string | null>(null);
+	const [isProjectLoading, setIsProjectLoading] = useState<boolean>(true);
+	const [isSavingProject, setIsSavingProject] = useState<boolean>(false);
+	const [isExitConfirmOpen, setIsExitConfirmOpen] = useState<boolean>(false);
+	const [isExitProcessing, setIsExitProcessing] = useState<boolean>(false);
 	const [currentTime, setCurrentTime] = useState<number>(0);
 	const [isPlaying, setIsPlaying] = useState<boolean>(false);
 	const [isExporting, setIsExporting] = useState<boolean>(false);
@@ -1417,6 +1520,25 @@ export default function EditorPage() {
 	const [exportUrl, setExportUrl] = useState<string | null>(null);
 
 	const sensors = useSensors(useSensor(PointerSensor));
+	const currentContent = useMemo(
+		() =>
+			stringifyProjectEditorContent({
+				clips,
+				selectedClipId,
+			}),
+		[clips, selectedClipId]
+	);
+	const normalizedCurrentTitle = useMemo(() => projectTitle.trim(), [projectTitle]);
+	const hasUnsavedChanges = useMemo(() => {
+		if (!projectId) {
+			return false;
+		}
+
+		return (
+			normalizedCurrentTitle !== lastSavedTitleRef.current ||
+			currentContent !== lastSavedContentRef.current
+		);
+	}, [currentContent, normalizedCurrentTitle, projectId]);
 
 	const syncEditorStateFromStorage = useCallback(() => {
 		setClips(readEditorClips<ClipItem>(initialClips).map(normalizeClip));
@@ -1425,8 +1547,96 @@ export default function EditorPage() {
 
 	useEffect(() => {
 		setMounted(true);
+	}, []);
+
+	useEffect(() => {
+		if (!mounted) {
+			return;
+		}
 		syncEditorStateFromStorage();
-	}, [syncEditorStateFromStorage]);
+	}, [mounted, syncEditorStateFromStorage]);
+
+	useEffect(() => {
+		if (!mounted) {
+			return;
+		}
+
+		let cancelled = false;
+
+		const bootstrapProject = async () => {
+			setIsProjectLoading(true);
+			setProjectError(null);
+			setProjectStatus(null);
+
+			try {
+				if (projectIdFromQuery) {
+					const response = await fetch(`/api/projects/${projectIdFromQuery}`, {
+						method: "GET",
+						cache: "no-store",
+					});
+					if (!response.ok) {
+						throw new Error("プロジェクトを読み込めませんでした。");
+					}
+					const data = (await response.json()) as ProjectRecord;
+					if (cancelled) {
+						return;
+					}
+					const projectContent = parseProjectEditorContent(data.content);
+					setProjectId(data.id);
+					setProjectTitle(data.title);
+					setClips(projectContent.clips);
+					setSelectedClipId(projectContent.selectedClipId);
+					lastSavedTitleRef.current = data.title;
+					lastSavedContentRef.current = stringifyProjectEditorContent(projectContent);
+					writeEditorClips(projectContent.clips.map(normalizeClip));
+					writeEditorSelectedClipId(projectContent.selectedClipId);
+					return;
+				}
+
+				const response = await fetch("/api/projects", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						title: "無題のプロジェクト",
+						content: stringifyProjectEditorContent(createInitialProjectContent()),
+					}),
+				});
+
+				if (!response.ok) {
+					throw new Error("新規プロジェクトの作成に失敗しました。");
+				}
+
+				const data = (await response.json()) as ProjectRecord;
+				if (cancelled) {
+					return;
+				}
+				setProjectId(data.id);
+				setProjectTitle(data.title);
+				setClips([]);
+				setSelectedClipId("");
+				lastSavedTitleRef.current = data.title;
+				lastSavedContentRef.current = stringifyProjectEditorContent(createInitialProjectContent());
+				writeEditorClips([]);
+				writeEditorSelectedClipId("");
+				router.replace(`/editor?projectId=${data.id}`);
+				setProjectStatus("新規プロジェクトを作成しました。");
+			} catch (error) {
+				if (!cancelled) {
+					setProjectError(error instanceof Error ? error.message : "プロジェクト処理に失敗しました。");
+				}
+			} finally {
+				if (!cancelled) {
+					setIsProjectLoading(false);
+				}
+			}
+		};
+
+		void bootstrapProject();
+
+		return () => {
+			cancelled = true;
+		};
+	}, [mounted, projectIdFromQuery, router]);
 
 	useEffect(() => {
 		if (!mounted) {
@@ -1464,6 +1674,20 @@ export default function EditorPage() {
 		}
 		writeEditorSelectedClipId(selectedClipId);
 	}, [mounted, selectedClipId]);
+
+	useEffect(() => {
+		if (!projectStatus) {
+			return;
+		}
+
+		const timerId = window.setTimeout(() => {
+			setProjectStatus(null);
+		}, 2600);
+
+		return () => {
+			window.clearTimeout(timerId);
+		};
+	}, [projectStatus]);
 
 	const duration = useMemo(() => {
 		return Math.max(8, ...clips.map((clip) => clip.start + clip.length + 0.5));
@@ -1613,10 +1837,78 @@ export default function EditorPage() {
 	const openClipSettings = useCallback(
 		(clipId: string) => {
 			setSelectedClipId(clipId);
-			router.push("/editor/clip/sample");
+			const query = projectId ? `?projectId=${projectId}` : "";
+			router.push(`/editor/clip/${clipId}${query}`);
 		},
-		[router]
+		[projectId, router]
 	);
+
+	const handleSaveProject = useCallback(async (): Promise<boolean> => {
+		if (!projectId || isSavingProject) {
+			return false;
+		}
+
+		setIsSavingProject(true);
+		setProjectError(null);
+		setProjectStatus(null);
+
+		try {
+			const response = await fetch(`/api/projects/${projectId}`, {
+				method: "PATCH",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					title: projectTitle,
+					content: stringifyProjectEditorContent({
+						clips,
+						selectedClipId,
+					}),
+				}),
+			});
+
+			if (!response.ok) {
+				throw new Error("保存に失敗しました。");
+			}
+
+			lastSavedTitleRef.current = normalizedCurrentTitle;
+			lastSavedContentRef.current = currentContent;
+			setProjectStatus("保存しました。");
+			return true;
+		} catch (error) {
+			setProjectError(error instanceof Error ? error.message : "保存に失敗しました。");
+			return false;
+		} finally {
+			setIsSavingProject(false);
+		}
+	}, [currentContent, isSavingProject, normalizedCurrentTitle, projectId, projectTitle]);
+
+	const handleExitWithSave = useCallback(async () => {
+		if (isExitProcessing) {
+			return;
+		}
+
+		setIsExitProcessing(true);
+		const saved = await handleSaveProject();
+		if (saved) {
+			router.push("/dashboard");
+		}
+		setIsExitProcessing(false);
+	}, [handleSaveProject, isExitProcessing, router]);
+
+	const handleExitWithoutSave = useCallback(() => {
+		if (isExitProcessing) {
+			return;
+		}
+		router.push("/dashboard");
+	}, [isExitProcessing, router]);
+
+	const handleDashboardClick = useCallback(() => {
+		if (!hasUnsavedChanges) {
+			router.push("/dashboard");
+			return;
+		}
+
+		setIsExitConfirmOpen(true);
+	}, [hasUnsavedChanges, router]);
 
 	const seekTo = (nextTime: number) => {
 		setCurrentTime(clamp(nextTime, 0, duration));
@@ -1707,6 +1999,8 @@ export default function EditorPage() {
 				backgroundBorderWidth: 0,
 				positionX: 0.5,
 				positionY: 0.5,
+				anchorX: "center",
+				anchorY: "middle",
 				transitions: {
 					inPoint: {
 						duration: 0,
@@ -1809,12 +2103,12 @@ export default function EditorPage() {
 		}
 	};
 
-	if (!mounted) {
+	if (!mounted || isProjectLoading) {
 		return (
 			<main className="mx-auto w-full max-w-[1400px] space-y-4 px-4 py-6 text-white">
 				<section className="rounded-lg bg-zinc-900 p-4">
 					<h1 className="text-lg font-semibold">Text Transition Editor</h1>
-					<p className="mt-1 text-sm text-white/70">エディターを初期化しています...</p>
+					<p className="mt-1 text-sm text-white/70">プロジェクトを初期化しています...</p>
 				</section>
 			</main>
 		);
@@ -1823,8 +2117,47 @@ export default function EditorPage() {
 	return (
 		<main className="mx-auto w-full max-w-[1400px] space-y-4 px-4 py-6 text-white">
 			<section className="rounded-lg bg-zinc-900 p-4">
-				<h1 className="text-lg font-semibold">Text Transition Editor</h1>
-				<p className="mt-1 text-sm text-white/70">テキスト専用トランジションシステムで編集します。</p>
+				<div className="flex flex-wrap items-center justify-between gap-3">
+					<div>
+						<h1 className="text-lg font-semibold">Text Transition Editor</h1>
+						<p className="mt-1 text-sm text-white/70">テキスト専用トランジションシステムで編集します。</p>
+					</div>
+					<div className="flex flex-wrap items-center gap-2">
+						<button
+							type="button"
+							onClick={handleDashboardClick}
+							className="rounded border border-white/20 px-3 py-1.5 text-sm text-white/90 hover:bg-white/10"
+						>
+							編集修了
+						</button>
+						<button
+							type="button"
+							className="rounded bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-60"
+							onClick={() => {
+								void handleSaveProject();
+							}}
+							disabled={!projectId || isSavingProject}
+						>
+							{isSavingProject ? "保存中..." : "保存"}
+						</button>
+					</div>
+				</div>
+				<div className="mt-3 flex flex-wrap items-center gap-2">
+					<label className="text-xs text-white/60" htmlFor="project-title">
+						タイトル
+					</label>
+					<input
+						id="project-title"
+						type="text"
+						value={projectTitle}
+						onChange={(event) => setProjectTitle(event.target.value)}
+						className="w-full max-w-sm rounded border border-white/20 bg-black/30 px-3 py-1.5 text-sm text-white outline-none ring-blue-500/70 focus:ring"
+						placeholder="プロジェクト名"
+					/>
+					{projectId ? <span className="text-xs text-white/50">ID: {projectId}</span> : null}
+				</div>
+				{projectStatus ? <p className="mt-2 text-xs text-emerald-300">{projectStatus}</p> : null}
+				{projectError ? <p className="mt-2 text-xs text-red-300">{projectError}</p> : null}
 			</section>
 
 			<DndContext sensors={sensors} onDragEnd={handleDragEnd}>
@@ -1999,6 +2332,8 @@ export default function EditorPage() {
 										backgroundBorderWidth,
 										positionX,
 										positionY,
+										anchorX,
+										anchorY,
 										color,
 										transitions,
 									}) => ({
@@ -2040,6 +2375,8 @@ export default function EditorPage() {
 										backgroundBorderWidth,
 										positionX,
 										positionY,
+										anchorX,
+										anchorY,
 										color,
 										transitions,
 									})
@@ -2051,6 +2388,53 @@ export default function EditorPage() {
 					</div>
 				</section>
 			</DndContext>
+
+			{isExitConfirmOpen ? (
+				<div
+					className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+					onClick={() => {
+						if (!isExitProcessing && !isSavingProject) {
+							setIsExitConfirmOpen(false);
+						}
+					}}
+				>
+					<div
+						className="w-full max-w-md rounded-xl border border-white/20 bg-zinc-900 p-5"
+						onClick={(event) => event.stopPropagation()}
+					>
+						<h2 className="text-base font-bold text-white">管理画面へ戻りますか？</h2>
+						<p className="mt-2 text-sm text-zinc-300">編集中の内容を保存するか選択してください。</p>
+						<div className="mt-4 flex flex-col gap-2">
+							<button
+								type="button"
+								onClick={() => {
+									void handleExitWithSave();
+								}}
+								className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-60"
+								disabled={isExitProcessing || isSavingProject}
+							>
+								{isExitProcessing || isSavingProject ? "保存中..." : "保存して終了する"}
+							</button>
+							<button
+								type="button"
+								onClick={handleExitWithoutSave}
+								className="rounded-md border border-zinc-500 px-4 py-2 text-sm font-semibold text-zinc-200 hover:bg-zinc-800 disabled:opacity-60"
+								disabled={isExitProcessing || isSavingProject}
+							>
+								保存せずに終了する
+							</button>
+							<button
+								type="button"
+								onClick={() => setIsExitConfirmOpen(false)}
+								className="rounded-md border border-zinc-600 px-4 py-2 text-sm font-semibold text-zinc-300 hover:bg-zinc-800 disabled:opacity-60"
+								disabled={isExitProcessing || isSavingProject}
+							>
+								編集に戻る
+							</button>
+						</div>
+					</div>
+				</div>
+			) : null}
 		</main>
 	);
 }

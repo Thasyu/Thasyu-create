@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/prisma";
 
-export const dynamic = "force-static";
-export const dynamicParams = false;
+export const dynamic = "force-dynamic";
+export const dynamicParams = true;
 
 const isGitHubPagesBuild = process.env.GITHUB_PAGES === "true";
 
@@ -26,18 +26,29 @@ const parseContentBody = (body: unknown) => {
     return null;
   }
 
+  const title = (body as { title?: unknown }).title;
   const content = (body as { content?: unknown }).content;
 
   if (typeof content !== "string") {
     return null;
   }
 
-  return { content };
-};
+  if (title !== undefined && typeof title !== "string") {
+    return null;
+  }
 
-export async function generateStaticParams() {
-  return [{ id: "sample" }];
-}
+  const payload: { content: string; title?: string } = { content };
+
+  if (typeof title === "string") {
+    const normalizedTitle = title.trim();
+    if (!normalizedTitle) {
+      return null;
+    }
+    payload.title = normalizedTitle;
+  }
+
+  return payload;
+};
 
 export async function GET(_: Request, { params }: RouteParams) {
   if (isGitHubPagesBuild) {
