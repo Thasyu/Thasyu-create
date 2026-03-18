@@ -9,7 +9,7 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import {
 	DndContext,
 	DragEndEvent,
@@ -1485,7 +1485,6 @@ const TimelineTrack = ({
 
 export default function EditorPage() {
 	const router = useRouter();
-	const searchParams = useSearchParams();
 	const timelineCanvasRef = useRef<HTMLDivElement | null>(null);
 	const trimRef = useRef<TrimState | null>(null);
 	const rafRef = useRef<number | null>(null);
@@ -1493,14 +1492,8 @@ export default function EditorPage() {
 	const lastSavedTitleRef = useRef("");
 	const lastSavedContentRef = useRef("");
 	const [mounted, setMounted] = useState(false);
-	const projectIdFromQuery = useMemo(() => {
-		const value = searchParams.get("projectId");
-		if (!value) {
-			return null;
-		}
-		const id = Number(value);
-		return Number.isInteger(id) && id > 0 ? id : null;
-	}, [searchParams]);
+	const [projectIdFromQuery, setProjectIdFromQuery] = useState<number | null>(null);
+	const [isQueryReady, setIsQueryReady] = useState(false);
 
 	const [clips, setClips] = useState<ClipItem[]>(initialClips);
 	const [selectedClipId, setSelectedClipId] = useState<string>("");
@@ -1551,6 +1544,31 @@ export default function EditorPage() {
 
 	useEffect(() => {
 		if (!mounted) {
+			return;
+		}
+
+		const syncProjectIdFromQuery = () => {
+			const search = window.location.search;
+			const value = new URLSearchParams(search).get("projectId");
+			if (!value) {
+				setProjectIdFromQuery(null);
+				return;
+			}
+
+			const id = Number(value);
+			setProjectIdFromQuery(Number.isInteger(id) && id > 0 ? id : null);
+		};
+
+		syncProjectIdFromQuery();
+		setIsQueryReady(true);
+		window.addEventListener("popstate", syncProjectIdFromQuery);
+		return () => {
+			window.removeEventListener("popstate", syncProjectIdFromQuery);
+		};
+	}, [mounted]);
+
+	useEffect(() => {
+		if (!mounted || !isQueryReady) {
 			return;
 		}
 		syncEditorStateFromStorage();
@@ -1636,7 +1654,7 @@ export default function EditorPage() {
 		return () => {
 			cancelled = true;
 		};
-	}, [mounted, projectIdFromQuery, router]);
+	}, [isQueryReady, mounted, projectIdFromQuery, router]);
 
 	useEffect(() => {
 		if (!mounted) {

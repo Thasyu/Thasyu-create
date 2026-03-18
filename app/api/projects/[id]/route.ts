@@ -2,8 +2,12 @@ import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/prisma";
 
-export const dynamic = "force-dynamic";
-export const dynamicParams = true;
+export const dynamic = "force-static";
+export const dynamicParams = false;
+
+export async function generateStaticParams() {
+  return [{ id: "sample" }];
+}
 
 const isGitHubPagesBuild = process.env.GITHUB_PAGES === "true";
 
