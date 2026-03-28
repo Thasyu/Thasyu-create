@@ -1143,10 +1143,22 @@ const ShaderPlane = ({
 	layerState: LayerState;
 }) => {
 	const materialRef = useRef<THREE.ShaderMaterial | null>(null);
+	const timerRef = useRef<THREE.Timer | null>(null);
 	const sourceCanvasARef = useRef<HTMLCanvasElement | null>(null);
 	const sourceCanvasBRef = useRef<HTMLCanvasElement | null>(null);
 	const sourceTextureARef = useRef<THREE.CanvasTexture | null>(null);
 	const sourceTextureBRef = useRef<THREE.CanvasTexture | null>(null);
+
+	useEffect(() => {
+		const timer = new THREE.Timer();
+		timer.connect(document);
+		timerRef.current = timer;
+
+		return () => {
+			timer.dispose();
+			timerRef.current = null;
+		};
+	}, []);
 
 	const uniforms = useMemo(
 		() => ({
@@ -1281,13 +1293,14 @@ const ShaderPlane = ({
 		};
 	}, []);
 
-	useFrame((state) => {
+	useFrame(() => {
 		const sourceCanvasA = sourceCanvasARef.current;
 		const sourceCanvasB = sourceCanvasBRef.current;
 		const textureA = sourceTextureARef.current;
 		const textureB = sourceTextureBRef.current;
 		const material = materialRef.current;
-		if (!sourceCanvasA || !sourceCanvasB || !textureA || !textureB || !material) {
+		const timer = timerRef.current;
+		if (!sourceCanvasA || !sourceCanvasB || !textureA || !textureB || !material || !timer) {
 			return;
 		}
 
@@ -1307,9 +1320,10 @@ const ShaderPlane = ({
 
 		textureA.needsUpdate = true;
 		textureB.needsUpdate = true;
+		timer.update();
 		material.uniforms.u_textureA.value = textureA;
 		material.uniforms.u_textureB.value = textureB;
-		material.uniforms.u_time.value = state.clock.elapsedTime;
+		material.uniforms.u_time.value = timer.getElapsed();
 		material.uniforms.u_progress.value = 0;
 		material.uniforms.u_effectType.value = effectCodeMap.none;
 		material.uniforms.u_hasOverlay.value = 0;
@@ -1542,6 +1556,25 @@ export default function EditorPage() {
 
 	useEffect(() => {
 		setMounted(true);
+	}, []);
+
+	useEffect(() => {
+		const originalWarn = console.warn;
+		console.warn = (...args: unknown[]) => {
+			const [first] = args;
+			if (
+				typeof first === "string" &&
+				first.includes("THREE.THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.")
+			) {
+				return;
+			}
+
+			originalWarn(...args);
+		};
+
+		return () => {
+			console.warn = originalWarn;
+		};
 	}, []);
 
 	useEffect(() => {

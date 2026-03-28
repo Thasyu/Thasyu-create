@@ -2,6 +2,18 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+Copy environment variables template first:
+
+```bash
+cp .env.example .env.local
+```
+
+PowerShell (Windows):
+
+```powershell
+Copy-Item .env.example .env.local
+```
+
 First, run the development server:
 
 ```bash
@@ -30,6 +42,18 @@ It converts the browser timeline JSON into an FFmpeg command and generates an MP
 - Open the editor page and click `Export MP4`.
 - The client sends timeline JSON (`clips`, `start`, `length`, `trimIn`, `track`, `zIndex`) to `/api/render`.
 - The server runs FFmpeg with `filter_complex` and returns a downloadable file URL like `/renders/<file>.mp4`.
+
+### Optional Environment Variables (Render Safeguards)
+
+- `RENDER_MAX_CLIPS` (default: `120`)
+- `RENDER_MAX_WIDTH` (default: `1920`)
+- `RENDER_MAX_HEIGHT` (default: `1080`)
+- `RENDER_MAX_FPS` (default: `60`)
+- `RENDER_MAX_DURATION_SECONDS` (default: `180`)
+- `RENDER_MAX_TOTAL_TEXT_LENGTH` (default: `20000`)
+- `RENDER_MAX_CONCURRENCY` (default: `2`)
+- `RENDER_RATE_LIMIT_WINDOW_MS` (default: `60000`)
+- `RENDER_RATE_LIMIT_MAX_REQUESTS` (default: `20`)
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

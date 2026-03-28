@@ -1,8 +1,10 @@
-import { NextResponse } from "next/server";
-
 import {
+  consumeIpRateLimit,
+  getClientIpKey,
   githubPagesUnavailableResponse,
   isGitHubPagesBuild,
+  jsonWithSecurityHeaders,
+  noContentWithSecurityHeaders,
   parsePositiveIntegerId,
 } from "@/lib/apiRouteUtils";
 import { prisma } from "@/lib/prisma";
@@ -10,6 +12,13 @@ import { prisma } from "@/lib/prisma";
 type RouteParams = {
   params: Promise<{ id: string }>;
 };
+
+const MAX_PROJECT_TITLE_LENGTH = 120;
+const MAX_PROJECT_CONTENT_LENGTH = 1_000_000;
+const PROJECT_ITEM_READ_WINDOW_MS = 60_000;
+const PROJECT_ITEM_READ_MAX_REQUESTS = 180;
+const PROJECT_ITEM_WRITE_WINDOW_MS = 60_000;
+const PROJECT_ITEM_WRITE_MAX_REQUESTS = 60;
 
 const parseContentBody = (body: unknown) => {
   if (!body || typeof body !== "object") {
@@ -34,22 +43,49 @@ const parseContentBody = (body: unknown) => {
     if (!normalizedTitle) {
       return null;
     }
+
+    if (normalizedTitle.length > MAX_PROJECT_TITLE_LENGTH) {
+      return null;
+    }
     payload.title = normalizedTitle;
+  }
+
+  if (content.length > MAX_PROJECT_CONTENT_LENGTH) {
+    return null;
   }
 
   return payload;
 };
 
-export async function GET(_: Request, { params }: RouteParams) {
+export async function GET(request: Request, { params }: RouteParams) {
   if (isGitHubPagesBuild) {
     return githubPagesUnavailableResponse();
+  }
+
+  const rateLimitResult = consumeIpRateLimit(
+    "projects:item:read",
+    getClientIpKey(request),
+    PROJECT_ITEM_READ_WINDOW_MS,
+    PROJECT_ITEM_READ_MAX_REQUESTS
+  );
+
+  if (!rateLimitResult.allowed) {
+    return jsonWithSecurityHeaders(
+      { error: "Too many requests. Please retry later." },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(rateLimitResult.retryAfterSeconds),
+        },
+      }
+    );
   }
 
   const { id } = await params;
   const projectId = parsePositiveIntegerId(id);
 
   if (!projectId) {
-    return NextResponse.json({ error: "Invalid project id." }, { status: 400 });
+    return jsonWithSecurityHeaders({ error: "Invalid project id." }, { status: 400 });
   }
 
   const project = await prisma.project.findUnique({
@@ -57,10 +93,10 @@ export async function GET(_: Request, { params }: RouteParams) {
   });
 
   if (!project) {
-    return NextResponse.json({ error: "Project not found." }, { status: 404 });
+    return jsonWithSecurityHeaders({ error: "Project not found." }, { status: 404 });
   }
 
-  return NextResponse.json(project, { status: 200 });
+  return jsonWithSecurityHeaders(project, { status: 200 });
 }
 
 export async function PATCH(request: Request, { params }: RouteParams) {
@@ -68,17 +104,37 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     return githubPagesUnavailableResponse();
   }
 
+  const rateLimitResult = consumeIpRateLimit(
+    "projects:item:write",
+    getClientIpKey(request),
+    PROJECT_ITEM_WRITE_WINDOW_MS,
+    PROJECT_ITEM_WRITE_MAX_REQUESTS
+  );
+
+  if (!rateLimitResult.allowed) {
+    return jsonWithSecurityHeaders(
+      { error: "Too many requests. Please retry later." },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(rateLimitResult.retryAfterSeconds),
+        },
+      }
+    );
+  }
+
   const { id } = await params;
   const projectId = parsePositiveIntegerId(id);
 
   if (!projectId) {
-    return NextResponse.json({ error: "Invalid project id." }, { status: 400 });
+    return jsonWithSecurityHeaders({ error: "Invalid project id." }, { status: 400 });
   }
 
-  const payload = parseContentBody(await request.json());
+  const body = await request.json().catch(() => null);
+  const payload = parseContentBody(body);
 
   if (!payload) {
-    return NextResponse.json(
+    return jsonWithSecurityHeaders(
       { error: "Invalid request body. content(string) is required." },
       { status: 400 }
     );
@@ -90,9 +146,9 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       data: payload,
     });
 
-    return NextResponse.json(project, { status: 200 });
+    return jsonWithSecurityHeaders(project, { status: 200 });
   } catch {
-    return NextResponse.json({ error: "Project not found." }, { status: 404 });
+    return jsonWithSecurityHeaders({ error: "Project not found." }, { status: 404 });
   }
 }
 
@@ -100,16 +156,35 @@ export async function PUT(request: Request, context: RouteParams) {
   return PATCH(request, context);
 }
 
-export async function DELETE(_: Request, { params }: RouteParams) {
+export async function DELETE(request: Request, { params }: RouteParams) {
   if (isGitHubPagesBuild) {
     return githubPagesUnavailableResponse();
+  }
+
+  const rateLimitResult = consumeIpRateLimit(
+    "projects:item:write",
+    getClientIpKey(request),
+    PROJECT_ITEM_WRITE_WINDOW_MS,
+    PROJECT_ITEM_WRITE_MAX_REQUESTS
+  );
+
+  if (!rateLimitResult.allowed) {
+    return jsonWithSecurityHeaders(
+      { error: "Too many requests. Please retry later." },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(rateLimitResult.retryAfterSeconds),
+        },
+      }
+    );
   }
 
   const { id } = await params;
   const projectId = parsePositiveIntegerId(id);
 
   if (!projectId) {
-    return NextResponse.json({ error: "Invalid project id." }, { status: 400 });
+    return jsonWithSecurityHeaders({ error: "Invalid project id." }, { status: 400 });
   }
 
   try {
@@ -117,8 +192,8 @@ export async function DELETE(_: Request, { params }: RouteParams) {
       where: { id: projectId },
     });
 
-    return new NextResponse(null, { status: 204 });
+    return noContentWithSecurityHeaders({ status: 204 });
   } catch {
-    return NextResponse.json({ error: "Project not found." }, { status: 404 });
+    return jsonWithSecurityHeaders({ error: "Project not found." }, { status: 404 });
   }
 }

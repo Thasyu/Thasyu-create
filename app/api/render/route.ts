@@ -62,6 +62,20 @@ const isTransitionEasing = (value: unknown): value is TransitionEasing => {
 	return transitionEasingTypes.includes(value as TransitionEasing);
 };
 
+const getEnvInt = (name: string, fallback: number, min: number, max: number): number => {
+	const raw = process.env[name];
+	if (!raw) {
+		return fallback;
+	}
+
+	const parsed = Number.parseInt(raw, 10);
+	if (!Number.isFinite(parsed)) {
+		return fallback;
+	}
+
+	return Math.min(max, Math.max(min, parsed));
+};
+
 type RenderTextClipInput = {
 	id: string;
 	text: string;
@@ -166,6 +180,66 @@ type NormalizedClip = {
 	outDuration: number;
 	inEasing: TransitionEasing;
 	outEasing: TransitionEasing;
+};
+
+const MAX_CLIPS = getEnvInt("RENDER_MAX_CLIPS", 120, 1, 2_000);
+const MAX_WIDTH = getEnvInt("RENDER_MAX_WIDTH", 1920, 320, 7680);
+const MAX_HEIGHT = getEnvInt("RENDER_MAX_HEIGHT", 1080, 180, 4320);
+const MAX_FPS = getEnvInt("RENDER_MAX_FPS", 60, 12, 240);
+const MAX_DURATION_SECONDS = getEnvInt("RENDER_MAX_DURATION_SECONDS", 180, 1, 3_600);
+const MAX_TOTAL_TEXT_LENGTH = getEnvInt("RENDER_MAX_TOTAL_TEXT_LENGTH", 20_000, 100, 2_000_000);
+const MAX_RENDER_CONCURRENCY = getEnvInt("RENDER_MAX_CONCURRENCY", 2, 1, 16);
+const RENDER_RATE_LIMIT_WINDOW_MS = getEnvInt("RENDER_RATE_LIMIT_WINDOW_MS", 60_000, 1_000, 3_600_000);
+const RENDER_RATE_LIMIT_MAX_REQUESTS = getEnvInt("RENDER_RATE_LIMIT_MAX_REQUESTS", 20, 1, 10_000);
+
+type RateLimitState = {
+	count: number;
+	resetAt: number;
+};
+
+const globalForRenderGuards = globalThis as unknown as {
+	renderRateLimitStore?: Map<string, RateLimitState>;
+	renderInFlightCount?: number;
+};
+
+const renderRateLimitStore = globalForRenderGuards.renderRateLimitStore ?? new Map<string, RateLimitState>();
+globalForRenderGuards.renderRateLimitStore = renderRateLimitStore;
+
+if (typeof globalForRenderGuards.renderInFlightCount !== "number") {
+	globalForRenderGuards.renderInFlightCount = 0;
+}
+
+const getClientKey = (request: Request): string => {
+	const forwardedFor = request.headers.get("x-forwarded-for") ?? "";
+	const firstIp = forwardedFor
+		.split(",")
+		.map((item) => item.trim())
+		.find((item) => item.length > 0);
+	const realIp = request.headers.get("x-real-ip")?.trim();
+
+	return firstIp ?? realIp ?? "unknown";
+};
+
+const consumeRateLimit = (key: string): { allowed: true } | { allowed: false; retryAfterSeconds: number } => {
+	const now = Date.now();
+	const existing = renderRateLimitStore.get(key);
+
+	if (!existing || existing.resetAt <= now) {
+		renderRateLimitStore.set(key, {
+			count: 1,
+			resetAt: now + RENDER_RATE_LIMIT_WINDOW_MS,
+		});
+		return { allowed: true };
+	}
+
+	if (existing.count >= RENDER_RATE_LIMIT_MAX_REQUESTS) {
+		const retryAfterSeconds = Math.max(1, Math.ceil((existing.resetAt - now) / 1000));
+		return { allowed: false, retryAfterSeconds };
+	}
+
+	existing.count += 1;
+	renderRateLimitStore.set(key, existing);
+	return { allowed: true };
 };
 
 const toNumber = (value: unknown, fallback: number): number => {
@@ -439,6 +513,14 @@ const parseBody = (body: unknown): { ok: true; value: RenderRequestBody } | { ok
 		return { ok: false, error: "clips(array) is required." };
 	}
 
+	if (payload.clips.length === 0) {
+		return { ok: false, error: "No valid text clips found." };
+	}
+
+	if (payload.clips.length > MAX_CLIPS) {
+		return { ok: false, error: `Too many clips. Maximum is ${MAX_CLIPS}.` };
+	}
+
 	return {
 		ok: true,
 		value: {
@@ -584,15 +666,36 @@ export async function POST(request: Request) {
 		return githubPagesUnavailableResponse();
 	}
 
+	const clientKey = getClientKey(request);
+	const rateLimitResult = consumeRateLimit(clientKey);
+	if (!rateLimitResult.allowed) {
+		return NextResponse.json(
+			{ error: "Too many render requests. Please retry later." },
+			{
+				status: 429,
+				headers: {
+					"Retry-After": String(rateLimitResult.retryAfterSeconds),
+				},
+			}
+		);
+	}
+
+	if ((globalForRenderGuards.renderInFlightCount ?? 0) >= MAX_RENDER_CONCURRENCY) {
+		return NextResponse.json(
+			{ error: "Render queue is busy. Please retry in a moment." },
+			{ status: 429 }
+		);
+	}
+
 	const body = await request.json().catch(() => null);
 	const parsed = parseBody(body);
 	if (!parsed.ok) {
 		return NextResponse.json({ error: parsed.error }, { status: 400 });
 	}
 
-	const width = Math.max(320, Math.floor(toNumber(parsed.value.width, 1280)));
-	const height = Math.max(180, Math.floor(toNumber(parsed.value.height, 720)));
-	const fps = Math.max(12, Math.floor(toNumber(parsed.value.fps, 30)));
+	const width = Math.min(MAX_WIDTH, Math.max(320, Math.floor(toNumber(parsed.value.width, 1280))));
+	const height = Math.min(MAX_HEIGHT, Math.max(180, Math.floor(toNumber(parsed.value.height, 720))));
+	const fps = Math.min(MAX_FPS, Math.max(12, Math.floor(toNumber(parsed.value.fps, 30))));
 	const backgroundColor = String(parsed.value.backgroundColor ?? "black");
 	const normalizedClips = normalizeClips(parsed.value.clips);
 
@@ -600,10 +703,25 @@ export async function POST(request: Request) {
 		return NextResponse.json({ error: "No valid text clips found." }, { status: 400 });
 	}
 
+	const totalTextLength = normalizedClips.reduce((sum, clip) => sum + clip.text.length, 0);
+	if (totalTextLength > MAX_TOTAL_TEXT_LENGTH) {
+		return NextResponse.json(
+			{ error: `Text is too long. Maximum total length is ${MAX_TOTAL_TEXT_LENGTH}.` },
+			{ status: 400 }
+		);
+	}
+
 	const duration = Math.max(
 		1,
 		normalizedClips.reduce((maxDuration, clip) => Math.max(maxDuration, clip.end), 0)
 	);
+
+	if (duration > MAX_DURATION_SECONDS) {
+		return NextResponse.json(
+			{ error: `Timeline is too long. Maximum duration is ${MAX_DURATION_SECONDS} seconds.` },
+			{ status: 400 }
+		);
+	}
 
 	const outputDir = path.join(process.cwd(), "public", "renders");
 	await mkdir(outputDir, { recursive: true });
@@ -745,6 +863,8 @@ export async function POST(request: Request) {
 		outputPath
 	);
 
+	globalForRenderGuards.renderInFlightCount = (globalForRenderGuards.renderInFlightCount ?? 0) + 1;
+
 	try {
 		await runFfmpeg(ffmpegArgs);
 		const notes: string[] = [];
@@ -768,7 +888,7 @@ export async function POST(request: Request) {
 				ok: true,
 				fileName,
 				url: `/renders/${fileName}`,
-				command: `ffmpeg ${ffmpegArgs.join(" ")}`,
+				command: process.env.NODE_ENV === "development" ? `ffmpeg ${ffmpegArgs.join(" ")}` : undefined,
 				notes,
 			},
 			{ status: 200 }
@@ -780,9 +900,14 @@ export async function POST(request: Request) {
 			{
 				error: notInstalled
 					? "FFmpeg is not installed or not in PATH. Please install FFmpeg and retry."
-					: message,
+					: "Failed to render video.",
 			},
 			{ status: 500 }
+		);
+	} finally {
+		globalForRenderGuards.renderInFlightCount = Math.max(
+			0,
+			(globalForRenderGuards.renderInFlightCount ?? 1) - 1
 		);
 	}
 }

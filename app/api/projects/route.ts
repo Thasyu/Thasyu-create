@@ -1,12 +1,23 @@
-import { NextResponse } from "next/server";
-
-import { githubPagesUnavailableResponse, isGitHubPagesBuild } from "@/lib/apiRouteUtils";
+import {
+  consumeIpRateLimit,
+  getClientIpKey,
+  githubPagesUnavailableResponse,
+  isGitHubPagesBuild,
+  jsonWithSecurityHeaders,
+} from "@/lib/apiRouteUtils";
 import { prisma } from "@/lib/prisma";
 
 type CreateProjectBody = {
   title: string;
   content: string;
 };
+
+const MAX_PROJECT_TITLE_LENGTH = 120;
+const MAX_PROJECT_CONTENT_LENGTH = 1_000_000;
+const PROJECTS_READ_WINDOW_MS = 60_000;
+const PROJECTS_READ_MAX_REQUESTS = 120;
+const PROJECTS_WRITE_WINDOW_MS = 60_000;
+const PROJECTS_WRITE_MAX_REQUESTS = 40;
 
 const parseCreateProjectBody = (body: unknown): CreateProjectBody | null => {
   if (!body || typeof body !== "object") {
@@ -25,15 +36,42 @@ const parseCreateProjectBody = (body: unknown): CreateProjectBody | null => {
     return null;
   }
 
+  if (normalizedTitle.length > MAX_PROJECT_TITLE_LENGTH) {
+    return null;
+  }
+
+  if (content.length > MAX_PROJECT_CONTENT_LENGTH) {
+    return null;
+  }
+
   return {
     title: normalizedTitle,
     content,
   };
 };
 
-export async function GET() {
+export async function GET(request: Request) {
   if (isGitHubPagesBuild) {
     return githubPagesUnavailableResponse();
+  }
+
+  const rateLimitResult = consumeIpRateLimit(
+    "projects:collection:read",
+    getClientIpKey(request),
+    PROJECTS_READ_WINDOW_MS,
+    PROJECTS_READ_MAX_REQUESTS
+  );
+
+  if (!rateLimitResult.allowed) {
+    return jsonWithSecurityHeaders(
+      { error: "Too many requests. Please retry later." },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(rateLimitResult.retryAfterSeconds),
+        },
+      }
+    );
   }
 
   const projects = await prisma.project.findMany({
@@ -42,7 +80,7 @@ export async function GET() {
     },
   });
 
-  return NextResponse.json(projects, { status: 200 });
+  return jsonWithSecurityHeaders(projects, { status: 200 });
 }
 
 export async function POST(request: Request) {
@@ -50,10 +88,30 @@ export async function POST(request: Request) {
     return githubPagesUnavailableResponse();
   }
 
-  const payload = parseCreateProjectBody(await request.json());
+  const rateLimitResult = consumeIpRateLimit(
+    "projects:collection:write",
+    getClientIpKey(request),
+    PROJECTS_WRITE_WINDOW_MS,
+    PROJECTS_WRITE_MAX_REQUESTS
+  );
+
+  if (!rateLimitResult.allowed) {
+    return jsonWithSecurityHeaders(
+      { error: "Too many requests. Please retry later." },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(rateLimitResult.retryAfterSeconds),
+        },
+      }
+    );
+  }
+
+  const body = await request.json().catch(() => null);
+  const payload = parseCreateProjectBody(body);
 
   if (!payload) {
-    return NextResponse.json(
+    return jsonWithSecurityHeaders(
       { error: "Invalid request body. title(string), content(string) are required." },
       { status: 400 }
     );
@@ -63,5 +121,5 @@ export async function POST(request: Request) {
     data: payload,
   });
 
-  return NextResponse.json(project, { status: 201 });
+  return jsonWithSecurityHeaders(project, { status: 201 });
 }

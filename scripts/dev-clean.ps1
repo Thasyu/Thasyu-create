@@ -1,6 +1,7 @@
 $nextNodeProcesses = Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" | Where-Object {
     $_.CommandLine -and (
         $_.CommandLine -match "next\\dist\\bin\\next" -or
+        $_.CommandLine -match "next\\dist\\server\\lib\\start-server\.js" -or
         $_.CommandLine -match "\\bnext\\s+dev\\b" -or
         $_.CommandLine -match "\\bnext-dev\\b"
     )

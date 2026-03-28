@@ -8,6 +8,10 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: true,
   },
+  allowedDevOrigins:
+    process.env.NODE_ENV === "development"
+      ? ["192.168.56.1", "http://192.168.56.1:3000", "http://192.168.56.1:3001"]
+      : undefined,
   trailingSlash: true,
   basePath: process.env.NODE_ENV === "production" ? `/${repoName}` : "",
   assetPrefix: process.env.NODE_ENV === "production" ? `/${repoName}/` : undefined,
